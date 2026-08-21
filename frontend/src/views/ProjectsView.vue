@@ -1,0 +1,117 @@
+<script setup lang="ts">
+import { onMounted, reactive, ref } from 'vue'
+
+import { projectApi } from '../services/api'
+import type { Project, ProjectCreate } from '../types/project'
+
+const projects = ref<Project[]>([])
+const loading = ref(true)
+const submitting = ref(false)
+const errorMessage = ref('')
+const form = reactive<ProjectCreate>({ name: '', repository_url: '', default_branch: 'main' })
+
+const statusText: Record<Project['status'], string> = {
+  pending: '等待接入',
+  indexing: '正在索引',
+  ready: '已就绪',
+  failed: '接入失败',
+}
+
+async function loadProjects() {
+  loading.value = true
+  errorMessage.value = ''
+  try {
+    projects.value = await projectApi.list()
+  } catch {
+    errorMessage.value = '无法连接 Python 后端，请确认 FastAPI 已在 8000 端口启动。'
+  } finally {
+    loading.value = false
+  }
+}
+
+async function createProject() {
+  submitting.value = true
+  errorMessage.value = ''
+  try {
+    const project = await projectApi.create(form)
+    projects.value.unshift(project)
+    Object.assign(form, { name: '', repository_url: '', default_branch: 'main' })
+  } catch {
+    errorMessage.value = '项目创建失败，请检查仓库地址和后端状态。'
+  } finally {
+    submitting.value = false
+  }
+}
+
+onMounted(loadProjects)
+</script>
+
+<template>
+  <section class="page">
+    <header class="page-header">
+      <div>
+        <p class="eyebrow">KNOWLEDGE WORKSPACE</p>
+        <h1>项目工作台</h1>
+        <p>接入代码仓库，为后续代码切片、知识索引和智能诊断准备数据。</p>
+      </div>
+      <div class="phase-pill">第一阶段</div>
+    </header>
+
+    <div class="metrics-grid">
+      <article class="metric-card">
+        <span>已接入项目</span><strong>{{ projects.length }}</strong><small>跨仓库知识将在此汇总</small>
+      </article>
+      <article class="metric-card">
+        <span>知识切片</span><strong>0</strong><small>下一阶段接入 AST 切片</small>
+      </article>
+      <article class="metric-card accent-card">
+        <span>系统状态</span><strong>{{ errorMessage ? '离线' : '可用' }}</strong><small>Vue → FastAPI</small>
+      </article>
+    </div>
+
+    <div class="content-grid">
+      <article class="panel">
+        <div class="panel-heading">
+          <div><p class="eyebrow">NEW PROJECT</p><h2>接入 GitHub 仓库</h2></div>
+        </div>
+
+        <form class="project-form" @submit.prevent="createProject">
+          <label>项目名称<input v-model.trim="form.name" minlength="2" required placeholder="例如：LangGraph" /></label>
+          <label>
+            仓库地址
+            <input v-model.trim="form.repository_url" type="url" required placeholder="https://github.com/org/repository" />
+          </label>
+          <label>默认分支<input v-model.trim="form.default_branch" required placeholder="main" /></label>
+          <button class="primary-button" type="submit" :disabled="submitting">
+            {{ submitting ? '正在创建…' : '创建项目' }}
+          </button>
+        </form>
+
+        <p v-if="errorMessage" class="error-banner">{{ errorMessage }}</p>
+      </article>
+
+      <article class="panel project-panel">
+        <div class="panel-heading">
+          <div><p class="eyebrow">REPOSITORIES</p><h2>项目列表</h2></div>
+          <button class="text-button" type="button" @click="loadProjects">刷新</button>
+        </div>
+
+        <div v-if="loading" class="empty-state">正在读取项目…</div>
+        <div v-else-if="projects.length === 0" class="empty-state">
+          <span class="empty-icon">＋</span><strong>还没有项目</strong><p>从左侧接入第一个公开 GitHub 仓库。</p>
+        </div>
+        <ul v-else class="project-list">
+          <li v-for="project in projects" :key="project.id">
+            <div class="repo-icon">{{ project.name.slice(0, 1).toUpperCase() }}</div>
+            <div class="repo-info">
+              <strong>{{ project.name }}</strong>
+              <a :href="project.repository_url" target="_blank" rel="noreferrer">{{ project.repository_url }}</a>
+              <small>{{ project.default_branch }} · {{ new Date(project.created_at).toLocaleString() }}</small>
+            </div>
+            <span class="status-badge" :data-status="project.status">{{ statusText[project.status] }}</span>
+          </li>
+        </ul>
+      </article>
+    </div>
+  </section>
+</template>

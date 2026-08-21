@@ -1,0 +1,130 @@
+:root {
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: #17211b;
+  background: #f3f5ef;
+  font-synthesis: none;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 320px; min-height: 100vh; }
+button, input { font: inherit; }
+
+.app-shell { display: grid; grid-template-columns: 248px 1fr; min-height: 100vh; }
+.sidebar {
+  position: sticky; top: 0; height: 100vh; display: flex; flex-direction: column;
+  padding: 28px 20px; color: #eaf1e9; background: #152a20;
+}
+.brand { display: flex; gap: 12px; align-items: center; color: inherit; text-decoration: none; }
+.brand-mark {
+  display: grid; width: 42px; height: 42px; place-items: center; border: 1px solid #5f806d;
+  border-radius: 12px; color: #17211b; background: #b9e86e; font-weight: 800;
+}
+.brand strong, .brand small { display: block; }
+.brand small { margin-top: 3px; color: #9fb2a6; font-size: 11px; }
+.nav-list { display: grid; gap: 8px; margin-top: 46px; }
+.nav-list > * {
+  padding: 12px 14px; border-radius: 10px; color: #adc0b4; font-size: 14px; text-decoration: none;
+}
+.nav-list a.router-link-active { color: #f7fff4; background: #294536; }
+.nav-disabled { display: flex; justify-content: space-between; opacity: .62; }
+.nav-disabled small { font-size: 10px; }
+.sidebar-status {
+  margin-top: auto; padding: 12px; border: 1px solid #304a3c; border-radius: 10px;
+  color: #aabdaf; font-size: 12px;
+}
+.status-dot {
+  display: inline-block; width: 7px; height: 7px; margin-right: 8px; border-radius: 50%;
+  background: #b9e86e; box-shadow: 0 0 0 4px rgb(185 232 110 / 12%);
+}
+.main-content { min-width: 0; }
+.page { max-width: 1400px; margin: 0 auto; padding: 48px; }
+.page-header { display: flex; justify-content: space-between; gap: 24px; align-items: flex-start; }
+.page-header h1 {
+  margin: 6px 0 8px; font-family: Georgia, serif; font-size: clamp(34px, 4vw, 52px);
+  font-weight: 500; letter-spacing: -.035em;
+}
+.page-header p:not(.eyebrow) { max-width: 680px; margin: 0; color: #68736b; }
+.eyebrow { margin: 0; color: #59705f; font-size: 11px; font-weight: 800; letter-spacing: .16em; }
+.phase-pill, .status-badge { border-radius: 999px; white-space: nowrap; }
+.phase-pill {
+  padding: 8px 12px; border: 1px solid #c7cec5; color: #536159; background: #fafbf8; font-size: 12px;
+}
+.metrics-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin: 36px 0 20px; }
+.metric-card, .panel {
+  border: 1px solid #d9ded6; background: #fbfcf9; box-shadow: 0 12px 35px rgb(29 54 39 / 5%);
+}
+.metric-card { padding: 22px; border-radius: 16px; }
+.metric-card span, .metric-card small, .metric-card strong { display: block; }
+.metric-card span { color: #617067; font-size: 13px; }
+.metric-card strong { margin: 8px 0 4px; font-family: Georgia, serif; font-size: 30px; font-weight: 500; }
+.metric-card small { color: #8b958e; }
+.accent-card { color: #effbe9; border-color: #244633; background: #254b37; }
+.accent-card span, .accent-card small { color: #b8cdbd; }
+.content-grid {
+  display: grid; grid-template-columns: minmax(300px, .8fr) minmax(420px, 1.2fr); gap: 20px;
+}
+.panel { padding: 26px; border-radius: 18px; }
+.panel-heading { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
+.panel h2 { margin: 5px 0 0; font-size: 20px; }
+.project-form { display: grid; gap: 17px; }
+.project-form label { display: grid; gap: 7px; color: #4f5e55; font-size: 13px; font-weight: 650; }
+.project-form input {
+  width: 100%; padding: 12px 13px; border: 1px solid #ccd4ca; border-radius: 9px;
+  outline: none; color: #1d2921; background: #fff;
+}
+.project-form input:focus { border-color: #73904f; box-shadow: 0 0 0 3px rgb(185 232 110 / 25%); }
+.primary-button {
+  padding: 12px 16px; border: 0; border-radius: 9px; color: #142019; background: #b9e86e;
+  cursor: pointer; font-weight: 750;
+}
+.primary-button:disabled { cursor: wait; opacity: .6; }
+.text-button { padding: 0; border: 0; color: #506b58; background: transparent; cursor: pointer; }
+.error-banner {
+  margin: 18px 0 0; padding: 11px 13px; border-radius: 8px; color: #8c342d;
+  background: #fff0ed; font-size: 13px;
+}
+.empty-state {
+  display: grid; min-height: 235px; place-items: center; align-content: center; color: #7c8981; text-align: center;
+}
+.empty-state p { margin: 6px 0 0; font-size: 13px; }
+.empty-icon {
+  display: grid; width: 40px; height: 40px; margin-bottom: 10px; place-items: center;
+  border: 1px dashed #abb8ae; border-radius: 50%; font-size: 24px;
+}
+.project-list { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.project-list li {
+  display: grid; grid-template-columns: 42px minmax(0, 1fr) auto; gap: 12px; align-items: center;
+  padding: 13px; border: 1px solid #e1e5df; border-radius: 12px; background: #fff;
+}
+.repo-icon {
+  display: grid; width: 42px; height: 42px; place-items: center; border-radius: 10px;
+  color: #eaffdf; background: #345c44; font-family: Georgia, serif; font-size: 20px;
+}
+.repo-info { min-width: 0; }
+.repo-info strong, .repo-info a, .repo-info small { display: block; }
+.repo-info a {
+  overflow: hidden; margin: 3px 0; color: #52695a; font-size: 12px; text-decoration: none;
+  text-overflow: ellipsis; white-space: nowrap;
+}
+.repo-info small { color: #97a099; font-size: 11px; }
+.status-badge { padding: 6px 9px; color: #715d22; background: #fff5cb; font-size: 11px; }
+.status-badge[data-status="ready"] { color: #275e3c; background: #e1f7e8; }
+.status-badge[data-status="failed"] { color: #8c342d; background: #ffe8e4; }
+
+@media (max-width: 960px) {
+  .app-shell { grid-template-columns: 1fr; }
+  .sidebar { position: static; height: auto; padding: 18px 24px; }
+  .nav-list { display: flex; overflow-x: auto; margin-top: 18px; }
+  .sidebar-status { display: none; }
+  .content-grid { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 640px) {
+  .page { padding: 28px 18px; }
+  .metrics-grid { grid-template-columns: 1fr; }
+  .page-header { display: block; }
+  .phase-pill { display: inline-block; margin-top: 16px; }
+  .panel { padding: 20px; }
+  .project-list li { grid-template-columns: 40px minmax(0, 1fr); }
+  .status-badge { grid-column: 2; justify-self: start; }
+}
