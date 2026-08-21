@@ -1,8 +1,53 @@
+from collections.abc import Generator
+
+import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import create_engine, delete
+from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import StaticPool
 
+from repopilot.db.base import Base
+from repopilot.db.session import get_session
 from repopilot.main import app
+from repopilot.models.project import Project
 
+test_engine = create_engine(
+    "sqlite://",
+    connect_args={"check_same_thread": False},
+    poolclass=StaticPool,
+)
+TestingSessionLocal = sessionmaker(bind=test_engine, autoflush=False, expire_on_commit=False)
+Base.metadata.create_all(bind=test_engine)
+
+
+def override_get_session() -> Generator[Session, None, None]:
+    with TestingSessionLocal() as session:
+        yield session
+
+
+app.dependency_overrides[get_session] = override_get_session
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def clean_database() -> Generator[None, None, None]:
+    with TestingSessionLocal() as session:
+        session.execute(delete(Project))
+        session.commit()
+    yield
+
+
+def create_project() -> dict[str, str]:
+    response = client.post(
+        "/api/v1/projects",
+        json={
+            "name": "LangGraph",
+            "repository_url": "https://github.com/langchain-ai/langgraph",
+            "default_branch": "main",
+        },
+    )
+    assert response.status_code == 201
+    return response.json()
 
 
 def test_health_check() -> None:
@@ -13,19 +58,38 @@ def test_health_check() -> None:
 
 
 def test_create_and_list_project() -> None:
-    create_response = client.post(
+    created = create_project()
+
+    assert created["status"] == "pending"
+    assert created["repository_url"] == "https://github.com/langchain-ai/langgraph"
+
+    list_response = client.get("/api/v1/projects")
+    assert list_response.status_code == 200
+    assert [project["id"] for project in list_response.json()] == [created["id"]]
+
+
+def test_duplicate_repository_is_rejected() -> None:
+    create_project()
+
+    duplicate_response = client.post(
         "/api/v1/projects",
         json={
-            "name": "LangGraph",
-            "repository_url": "https://github.com/langchain-ai/langgraph",
+            "name": "Duplicate",
+            "repository_url": "https://github.com/langchain-ai/langgraph.git",
             "default_branch": "main",
         },
     )
 
-    assert create_response.status_code == 201
-    assert create_response.json()["status"] == "pending"
+    assert duplicate_response.status_code == 409
 
-    list_response = client.get("/api/v1/projects")
-    assert list_response.status_code == 200
-    assert any(project["name"] == "LangGraph" for project in list_response.json())
 
+def test_get_and_delete_project() -> None:
+    created = create_project()
+
+    get_response = client.get(f"/api/v1/projects/{created['id']}")
+    assert get_response.status_code == 200
+    assert get_response.json()["name"] == "LangGraph"
+
+    delete_response = client.delete(f"/api/v1/projects/{created['id']}")
+    assert delete_response.status_code == 204
+    assert client.get(f"/api/v1/projects/{created['id']}").status_code == 404

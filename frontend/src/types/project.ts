@@ -7,6 +7,7 @@ export interface Project {
   default_branch: string
   status: ProjectStatus
   created_at: string
+  updated_at: string
 }
 
 export interface ProjectCreate {
@@ -14,4 +15,3 @@ export interface ProjectCreate {
   repository_url: string
   default_branch: string
 }
-

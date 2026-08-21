@@ -2,6 +2,15 @@ import type { Project, ProjectCreate } from '../types/project'
 
 const API_PREFIX = '/api/v1'
 
+export class ApiError extends Error {
+  constructor(
+    public readonly status: number,
+    message: string,
+  ) {
+    super(message)
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_PREFIX}${path}`, {
     headers: { 'Content-Type': 'application/json', ...init?.headers },
@@ -9,9 +18,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   })
 
   if (!response.ok) {
-    throw new Error(`请求失败：${response.status}`)
+    const body = (await response.json().catch(() => null)) as { detail?: string } | null
+    throw new ApiError(response.status, body?.detail ?? `请求失败：${response.status}`)
   }
 
+  if (response.status === 204) return undefined as T
   return response.json() as Promise<T>
 }
 
@@ -22,4 +33,5 @@ export const projectApi = {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
+  remove: (projectId: string) => request<void>(`/projects/${projectId}`, { method: 'DELETE' }),
 }

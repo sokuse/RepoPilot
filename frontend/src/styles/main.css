@@ -110,6 +110,13 @@ button, input { font: inherit; }
 .status-badge { padding: 6px 9px; color: #715d22; background: #fff5cb; font-size: 11px; }
 .status-badge[data-status="ready"] { color: #275e3c; background: #e1f7e8; }
 .status-badge[data-status="failed"] { color: #8c342d; background: #ffe8e4; }
+.project-actions { display: flex; gap: 8px; align-items: center; }
+.delete-button {
+  padding: 5px 8px; border: 0; border-radius: 7px; color: #8c4a43; background: transparent;
+  cursor: pointer; font-size: 11px;
+}
+.delete-button:hover { background: #fff0ed; }
+.delete-button:disabled { cursor: wait; opacity: .55; }
 
 @media (max-width: 960px) {
   .app-shell { grid-template-columns: 1fr; }
@@ -126,5 +133,5 @@ button, input { font: inherit; }
   .phase-pill { display: inline-block; margin-top: 16px; }
   .panel { padding: 20px; }
   .project-list li { grid-template-columns: 40px minmax(0, 1fr); }
-  .status-badge { grid-column: 2; justify-self: start; }
+  .project-actions { grid-column: 2; justify-self: start; }
 }

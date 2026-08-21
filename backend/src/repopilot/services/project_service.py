@@ -1,34 +1,49 @@
-from datetime import UTC, datetime
-from threading import Lock
-from uuid import uuid4
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 
-from repopilot.schemas.project import ProjectCreate, ProjectResponse
+from repopilot.models.project import Project
+from repopilot.schemas.project import ProjectCreate
+
+
+class DuplicateRepositoryError(Exception):
+    """Raised when a repository has already been registered."""
 
 
 class ProjectService:
-    """Temporary in-memory project store, replaced by PostgreSQL in phase two."""
+    @staticmethod
+    def list(session: Session) -> list[Project]:
+        statement = select(Project).order_by(Project.created_at.desc())
+        return list(session.scalars(statement).all())
 
-    def __init__(self) -> None:
-        self._projects: list[ProjectResponse] = []
-        self._lock = Lock()
+    @staticmethod
+    def get(session: Session, project_id: str) -> Project | None:
+        return session.get(Project, project_id)
 
-    def list(self) -> list[ProjectResponse]:
-        with self._lock:
-            return list(self._projects)
+    @staticmethod
+    def create(session: Session, payload: ProjectCreate) -> Project:
+        repository_url = str(payload.repository_url).rstrip("/")
+        if repository_url.endswith(".git"):
+            repository_url = repository_url[:-4]
 
-    def create(self, payload: ProjectCreate) -> ProjectResponse:
-        project = ProjectResponse(
-            id=uuid4(),
+        project = Project(
             name=payload.name,
-            repository_url=str(payload.repository_url),
+            repository_url=repository_url,
             default_branch=payload.default_branch,
-            status="pending",
-            created_at=datetime.now(UTC),
         )
-        with self._lock:
-            self._projects.insert(0, project)
+        session.add(project)
+        try:
+            session.commit()
+        except IntegrityError as error:
+            session.rollback()
+            raise DuplicateRepositoryError from error
+        session.refresh(project)
         return project
+
+    @staticmethod
+    def delete(session: Session, project: Project) -> None:
+        session.delete(project)
+        session.commit()
 
 
 project_service = ProjectService()
-

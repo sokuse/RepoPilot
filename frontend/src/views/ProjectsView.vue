@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
 
-import { projectApi } from '../services/api'
+import { ApiError, projectApi } from '../services/api'
 import type { Project, ProjectCreate } from '../types/project'
 
 const projects = ref<Project[]>([])
 const loading = ref(true)
 const submitting = ref(false)
+const deletingProjectId = ref<string | null>(null)
 const errorMessage = ref('')
 const form = reactive<ProjectCreate>({ name: '', repository_url: '', default_branch: 'main' })
 
@@ -36,10 +37,28 @@ async function createProject() {
     const project = await projectApi.create(form)
     projects.value.unshift(project)
     Object.assign(form, { name: '', repository_url: '', default_branch: 'main' })
-  } catch {
-    errorMessage.value = '项目创建失败，请检查仓库地址和后端状态。'
+  } catch (error) {
+    errorMessage.value =
+      error instanceof ApiError && error.status === 409
+        ? '这个仓库已经接入，无需重复创建。'
+        : '项目创建失败，请检查仓库地址和后端状态。'
   } finally {
     submitting.value = false
+  }
+}
+
+async function deleteProject(project: Project) {
+  if (!window.confirm(`确定删除项目“${project.name}”吗？`)) return
+
+  deletingProjectId.value = project.id
+  errorMessage.value = ''
+  try {
+    await projectApi.remove(project.id)
+    projects.value = projects.value.filter((item) => item.id !== project.id)
+  } catch {
+    errorMessage.value = '项目删除失败，请刷新页面后重试。'
+  } finally {
+    deletingProjectId.value = null
   }
 }
 
@@ -108,7 +127,17 @@ onMounted(loadProjects)
               <a :href="project.repository_url" target="_blank" rel="noreferrer">{{ project.repository_url }}</a>
               <small>{{ project.default_branch }} · {{ new Date(project.created_at).toLocaleString() }}</small>
             </div>
-            <span class="status-badge" :data-status="project.status">{{ statusText[project.status] }}</span>
+            <div class="project-actions">
+              <span class="status-badge" :data-status="project.status">{{ statusText[project.status] }}</span>
+              <button
+                class="delete-button"
+                type="button"
+                :disabled="deletingProjectId === project.id"
+                @click="deleteProject(project)"
+              >
+                {{ deletingProjectId === project.id ? '删除中' : '删除' }}
+              </button>
+            </div>
           </li>
         </ul>
       </article>

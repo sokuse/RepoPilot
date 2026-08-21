@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     environment: str = "development"
     api_v1_prefix: str = "/api/v1"
     cors_origins: list[str] = ["http://localhost:5173"]
+    database_url: str = "sqlite:///./repopilot.db"
 
 
 @lru_cache
@@ -22,4 +23,3 @@ def get_settings() -> Settings:
 
 
 settings = get_settings()
-

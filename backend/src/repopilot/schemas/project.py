@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl
 
 ProjectStatus = Literal["pending", "indexing", "ready", "failed"]
 
@@ -14,10 +14,12 @@ class ProjectCreate(BaseModel):
 
 
 class ProjectResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: UUID
     name: str
     repository_url: str
     default_branch: str
     status: ProjectStatus
     created_at: datetime
-
+    updated_at: datetime

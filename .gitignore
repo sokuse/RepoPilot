@@ -1,6 +1,9 @@
 .venv/
 __pycache__/
 *.py[cod]
+*.db
+.coverage
+htmlcov/
 .pytest_cache/
 .ruff_cache/
 .env
@@ -8,8 +11,8 @@ __pycache__/
 node_modules/
 dist/
 .vite/
+*.tsbuildinfo
 
 .idea/
 .vscode/
 .DS_Store
-
