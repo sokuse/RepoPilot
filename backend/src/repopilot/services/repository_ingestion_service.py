@@ -2,6 +2,7 @@ import logging
 import os
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 from sqlalchemy import delete, func, select
@@ -100,13 +101,22 @@ def remove_repository_checkout(project_id: str) -> None:
 
 def clone_repository(repository_url: str, branch: str, target: Path) -> None:
     target.parent.mkdir(parents=True, exist_ok=True)
-    _remove_existing_target(target)
     environment = os.environ.copy()
     environment["GIT_TERMINAL_PROMPT"] = "0"
+    git_options: list[str] = []
+    if settings.git_proxy_url:
+        # 显式传给 Git，避免 PyCharm 进程没有继承系统代理环境变量。
+        git_options = [
+            "-c",
+            f"http.proxy={settings.git_proxy_url}",
+            "-c",
+            f"https.proxy={settings.git_proxy_url}",
+        ]
     # 不使用 shell=True；URL 和分支作为独立参数传入，避免命令拼接注入。
     # depth=1 只下载目标分支最新快照，采集阶段不需要完整 Git 历史。
     command = [
         "git",
+        *git_options,
         "clone",
         "--depth=1",
         "--single-branch",
@@ -117,25 +127,43 @@ def clone_repository(repository_url: str, branch: str, target: Path) -> None:
         repository_url,
         str(target),
     ]
-    try:
-        result = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            env=environment,
-            timeout=settings.git_clone_timeout_seconds,
-            check=False,
-        )
-    except (OSError, subprocess.TimeoutExpired) as error:
+    last_error: Exception | None = None
+    last_message = "Git clone could not be completed"
+    for attempt in range(1, settings.git_clone_attempts + 1):
         _remove_existing_target(target)
-        raise RepositoryCloneError("Git clone could not be completed") from error
+        try:
+            result = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                env=environment,
+                timeout=settings.git_clone_timeout_seconds,
+                check=False,
+            )
+            if result.returncode == 0:
+                return
+            last_message = result.stderr.strip()[-1000:] or "Unknown Git clone error"
+        except (OSError, subprocess.TimeoutExpired) as error:
+            last_error = error
+            last_message = "Git clone could not be completed"
 
-    if result.returncode != 0:
-        _remove_existing_target(target)
-        message = result.stderr.strip()[-1000:] or "Unknown Git clone error"
-        raise RepositoryCloneError(message)
+        if attempt < settings.git_clone_attempts:
+            delay = settings.git_retry_base_delay_seconds * attempt
+            logger.warning(
+                "Git clone attempt %s/%s failed; retrying in %.1fs: %s",
+                attempt,
+                settings.git_clone_attempts,
+                delay,
+                last_message,
+            )
+            time.sleep(delay)
+
+    _remove_existing_target(target)
+    if last_error is not None:
+        raise RepositoryCloneError(last_message) from last_error
+    raise RepositoryCloneError(last_message)
 
 
 def run_repository_ingestion(project_id: str) -> None:

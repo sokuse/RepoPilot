@@ -1,4 +1,4 @@
-import type { Project, ProjectCreate, RepositoryStats } from '../types/project'
+import type { ChunkingStats, Project, ProjectCreate, RepositoryStats } from '../types/project'
 
 const API_PREFIX = '/api/v1'
 
@@ -37,4 +37,8 @@ export const projectApi = {
   ingest: (projectId: string) =>
     request<Project>(`/projects/${projectId}/ingest`, { method: 'POST' }),
   stats: (projectId: string) => request<RepositoryStats>(`/projects/${projectId}/stats`),
+  chunkStats: (projectId: string) =>
+    request<ChunkingStats>(`/projects/${projectId}/chunks/stats`),
+  rebuildChunks: (projectId: string) =>
+    request<ChunkingStats>(`/projects/${projectId}/chunks`, { method: 'POST' }),
 }

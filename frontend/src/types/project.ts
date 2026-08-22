@@ -23,3 +23,11 @@ export interface RepositoryStats {
   total_bytes: number
   language_breakdown: Record<string, number>
 }
+
+// 切片统计会在后续 Embedding 阶段继续复用，用来展示知识库构建进度。
+export interface ChunkingStats {
+  project_id: string
+  total_chunks: number
+  total_chars: number
+  strategy_breakdown: Record<string, number>
+}

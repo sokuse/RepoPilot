@@ -1,17 +1,22 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, reactive, ref } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 
 import { ApiError, projectApi } from '../services/api'
-import type { Project, ProjectCreate, RepositoryStats } from '../types/project'
+import type { ChunkingStats, Project, ProjectCreate, RepositoryStats } from '../types/project'
 
 const projects = ref<Project[]>([])
 const loading = ref(true)
 const submitting = ref(false)
 const deletingProjectId = ref<string | null>(null)
 const ingestingProjectId = ref<string | null>(null)
+const chunkingProjectId = ref<string | null>(null)
 const errorMessage = ref('')
 const projectStats = ref<Record<string, RepositoryStats>>({})
+const chunkStats = ref<Record<string, ChunkingStats>>({})
 const form = reactive<ProjectCreate>({ name: '', repository_url: '', default_branch: 'main' })
+const totalChunks = computed(() =>
+  Object.values(chunkStats.value).reduce((total, stats) => total + stats.total_chunks, 0),
+)
 
 const statusText: Record<Project['status'], string> = {
   pending: '等待接入',
@@ -38,13 +43,23 @@ async function loadReadyProjectStats() {
   const entries = await Promise.all(
     readyProjects.map(async (project) => {
       try {
-        return [project.id, await projectApi.stats(project.id)] as const
+        const [repositoryStats, knowledgeStats] = await Promise.all([
+          projectApi.stats(project.id),
+          projectApi.chunkStats(project.id),
+        ])
+        return [project.id, repositoryStats, knowledgeStats] as const
       } catch {
         return null
       }
     }),
   )
-  projectStats.value = Object.fromEntries(entries.filter((entry) => entry !== null))
+  const successfulEntries = entries.filter((entry) => entry !== null)
+  projectStats.value = Object.fromEntries(
+    successfulEntries.map(([projectId, repositoryStats]) => [projectId, repositoryStats]),
+  )
+  chunkStats.value = Object.fromEntries(
+    successfulEntries.map(([projectId, , knowledgeStats]) => [projectId, knowledgeStats]),
+  )
 }
 
 async function createProject() {
@@ -97,6 +112,20 @@ async function startIngestion(project: Project) {
   }
 }
 
+async function rebuildChunks(project: Project) {
+  chunkingProjectId.value = project.id
+  errorMessage.value = ''
+  try {
+    const stats = await projectApi.rebuildChunks(project.id)
+    chunkStats.value = { ...chunkStats.value, [project.id]: stats }
+  } catch (error) {
+    errorMessage.value =
+      error instanceof ApiError ? error.message : '知识切片生成失败，请查看后端日志。'
+  } finally {
+    chunkingProjectId.value = null
+  }
+}
+
 function formatBytes(bytes: number) {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
@@ -131,7 +160,7 @@ onUnmounted(() => window.clearInterval(pollingTimer))
         <h1>项目工作台</h1>
         <p>接入代码仓库，为后续代码切片、知识索引和智能诊断准备数据。</p>
       </div>
-      <div class="phase-pill">第一阶段</div>
+      <div class="phase-pill">第二阶段 · RAG 切片</div>
     </header>
 
     <div class="metrics-grid">
@@ -139,7 +168,7 @@ onUnmounted(() => window.clearInterval(pollingTimer))
         <span>已接入项目</span><strong>{{ projects.length }}</strong><small>跨仓库知识将在此汇总</small>
       </article>
       <article class="metric-card">
-        <span>知识切片</span><strong>0</strong><small>下一阶段接入 AST 切片</small>
+        <span>知识切片</span><strong>{{ totalChunks }}</strong><small>可追溯至源文件和行号</small>
       </article>
       <article class="metric-card accent-card">
         <span>系统状态</span><strong>{{ errorMessage ? '离线' : '可用' }}</strong><small>Vue → FastAPI</small>
@@ -189,6 +218,9 @@ onUnmounted(() => window.clearInterval(pollingTimer))
                 {{ formatBytes(projectStats[project.id].total_bytes) }} ·
                 {{ topLanguages(projectStats[project.id]) }}
               </small>
+              <small v-if="chunkStats[project.id]?.total_chunks" class="repo-stats">
+                {{ chunkStats[project.id].total_chunks }} 个知识切片
+              </small>
             </div>
             <div class="project-actions">
               <span class="status-badge" :data-status="project.status">{{ statusText[project.status] }}</span>
@@ -200,6 +232,21 @@ onUnmounted(() => window.clearInterval(pollingTimer))
                 @click="startIngestion(project)"
               >
                 {{ ingestingProjectId === project.id ? '启动中' : project.status === 'failed' ? '重试' : '开始采集' }}
+              </button>
+              <button
+                v-if="project.status === 'ready'"
+                class="chunk-button"
+                type="button"
+                :disabled="chunkingProjectId === project.id"
+                @click="rebuildChunks(project)"
+              >
+                {{
+                  chunkingProjectId === project.id
+                    ? '切片中'
+                    : chunkStats[project.id]?.total_chunks
+                      ? '重建切片'
+                      : '生成切片'
+                }}
               </button>
               <button
                 class="delete-button"

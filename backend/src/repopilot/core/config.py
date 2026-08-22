@@ -20,7 +20,12 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./repopilot.db"
     repository_storage_path: Path = BACKEND_DIR / "data" / "repositories"
     git_clone_timeout_seconds: int = 300
+    git_clone_attempts: int = 3
+    git_retry_base_delay_seconds: float = 1.0
+    git_proxy_url: str | None = None
     max_scanned_file_size_bytes: int = 1_000_000
+    chunk_size_chars: int = 1_500
+    chunk_overlap_chars: int = 200
 
 
 @lru_cache

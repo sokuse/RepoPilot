@@ -118,6 +118,12 @@ button, input { font: inherit; }
 }
 .ingest-button:hover { background: #d2eca7; }
 .ingest-button:disabled { cursor: wait; opacity: .55; }
+.chunk-button {
+  padding: 6px 9px; border: 1px solid #b8c9bc; border-radius: 7px; color: #315541;
+  background: #f3f8f2; cursor: pointer; font-size: 11px; font-weight: 650;
+}
+.chunk-button:hover { background: #e8f3e5; }
+.chunk-button:disabled { cursor: wait; opacity: .55; }
 .delete-button {
   padding: 5px 8px; border: 0; border-radius: 7px; color: #8c4a43; background: transparent;
   cursor: pointer; font-size: 11px;
