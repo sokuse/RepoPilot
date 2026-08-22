@@ -2,5 +2,4 @@ from sqlalchemy.orm import DeclarativeBase
 
 
 class Base(DeclarativeBase):
-    """Base class shared by all SQLAlchemy models."""
-
+    """所有 SQLAlchemy 数据库模型共享的声明式基类。"""

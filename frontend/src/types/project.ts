@@ -15,3 +15,11 @@ export interface ProjectCreate {
   repository_url: string
   default_branch: string
 }
+
+// 仓库采集完成后的文件规模和语言分布。
+export interface RepositoryStats {
+  project_id: string
+  total_files: number
+  total_bytes: number
+  language_breakdown: Record<string, number>
+}

@@ -107,10 +107,17 @@ button, input { font: inherit; }
   text-overflow: ellipsis; white-space: nowrap;
 }
 .repo-info small { color: #97a099; font-size: 11px; }
+.repo-info .repo-stats { margin-top: 5px; color: #5d7465; }
 .status-badge { padding: 6px 9px; color: #715d22; background: #fff5cb; font-size: 11px; }
 .status-badge[data-status="ready"] { color: #275e3c; background: #e1f7e8; }
 .status-badge[data-status="failed"] { color: #8c342d; background: #ffe8e4; }
 .project-actions { display: flex; gap: 8px; align-items: center; }
+.ingest-button {
+  padding: 6px 9px; border: 0; border-radius: 7px; color: #203d2b; background: #dff3bd;
+  cursor: pointer; font-size: 11px; font-weight: 650;
+}
+.ingest-button:hover { background: #d2eca7; }
+.ingest-button:disabled { cursor: wait; opacity: .55; }
 .delete-button {
   padding: 5px 8px; border: 0; border-radius: 7px; color: #8c4a43; background: transparent;
   cursor: pointer; font-size: 11px;

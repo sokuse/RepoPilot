@@ -1,4 +1,4 @@
-import type { Project, ProjectCreate } from '../types/project'
+import type { Project, ProjectCreate, RepositoryStats } from '../types/project'
 
 const API_PREFIX = '/api/v1'
 
@@ -34,4 +34,7 @@ export const projectApi = {
       body: JSON.stringify(payload),
     }),
   remove: (projectId: string) => request<void>(`/projects/${projectId}`, { method: 'DELETE' }),
+  ingest: (projectId: string) =>
+    request<Project>(`/projects/${projectId}/ingest`, { method: 'POST' }),
+  stats: (projectId: string) => request<RepositoryStats>(`/projects/${projectId}/stats`),
 }

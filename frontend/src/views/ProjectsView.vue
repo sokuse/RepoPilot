@@ -1,14 +1,16 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { onMounted, onUnmounted, reactive, ref } from 'vue'
 
 import { ApiError, projectApi } from '../services/api'
-import type { Project, ProjectCreate } from '../types/project'
+import type { Project, ProjectCreate, RepositoryStats } from '../types/project'
 
 const projects = ref<Project[]>([])
 const loading = ref(true)
 const submitting = ref(false)
 const deletingProjectId = ref<string | null>(null)
+const ingestingProjectId = ref<string | null>(null)
 const errorMessage = ref('')
+const projectStats = ref<Record<string, RepositoryStats>>({})
 const form = reactive<ProjectCreate>({ name: '', repository_url: '', default_branch: 'main' })
 
 const statusText: Record<Project['status'], string> = {
@@ -18,16 +20,31 @@ const statusText: Record<Project['status'], string> = {
   failed: '接入失败',
 }
 
-async function loadProjects() {
-  loading.value = true
-  errorMessage.value = ''
+async function loadProjects(silent = false) {
+  if (!silent) loading.value = true
+  if (!silent) errorMessage.value = ''
   try {
     projects.value = await projectApi.list()
+    await loadReadyProjectStats()
   } catch {
-    errorMessage.value = '无法连接 Python 后端，请确认 FastAPI 已在 8000 端口启动。'
+    if (!silent) errorMessage.value = '无法连接 Python 后端，请确认 FastAPI 已在 8000 端口启动。'
   } finally {
-    loading.value = false
+    if (!silent) loading.value = false
   }
+}
+
+async function loadReadyProjectStats() {
+  const readyProjects = projects.value.filter((project) => project.status === 'ready')
+  const entries = await Promise.all(
+    readyProjects.map(async (project) => {
+      try {
+        return [project.id, await projectApi.stats(project.id)] as const
+      } catch {
+        return null
+      }
+    }),
+  )
+  projectStats.value = Object.fromEntries(entries.filter((entry) => entry !== null))
 }
 
 async function createProject() {
@@ -62,7 +79,48 @@ async function deleteProject(project: Project) {
   }
 }
 
-onMounted(loadProjects)
+async function startIngestion(project: Project) {
+  ingestingProjectId.value = project.id
+  errorMessage.value = ''
+  try {
+    const updatedProject = await projectApi.ingest(project.id)
+    projects.value = projects.value.map((item) =>
+      item.id === updatedProject.id ? updatedProject : item,
+    )
+  } catch (error) {
+    errorMessage.value =
+      error instanceof ApiError && error.status === 409
+        ? error.message
+        : '仓库采集启动失败，请检查后端日志和仓库分支。'
+  } finally {
+    ingestingProjectId.value = null
+  }
+}
+
+function formatBytes(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+}
+
+function topLanguages(stats: RepositoryStats) {
+  return Object.entries(stats.language_breakdown)
+    .slice(0, 3)
+    .map(([language, count]) => `${language} ${count}`)
+    .join(' · ')
+}
+
+let pollingTimer: number | undefined
+onMounted(async () => {
+  await loadProjects()
+  // 仅在存在采集任务时轮询，避免页面空闲时不断请求后端。
+  pollingTimer = window.setInterval(() => {
+    if (projects.value.some((project) => project.status === 'indexing')) {
+      void loadProjects(true)
+    }
+  }, 3000)
+})
+onUnmounted(() => window.clearInterval(pollingTimer))
 </script>
 
 <template>
@@ -112,7 +170,7 @@ onMounted(loadProjects)
       <article class="panel project-panel">
         <div class="panel-heading">
           <div><p class="eyebrow">REPOSITORIES</p><h2>项目列表</h2></div>
-          <button class="text-button" type="button" @click="loadProjects">刷新</button>
+          <button class="text-button" type="button" @click="loadProjects()">刷新</button>
         </div>
 
         <div v-if="loading" class="empty-state">正在读取项目…</div>
@@ -126,9 +184,23 @@ onMounted(loadProjects)
               <strong>{{ project.name }}</strong>
               <a :href="project.repository_url" target="_blank" rel="noreferrer">{{ project.repository_url }}</a>
               <small>{{ project.default_branch }} · {{ new Date(project.created_at).toLocaleString() }}</small>
+              <small v-if="projectStats[project.id]" class="repo-stats">
+                {{ projectStats[project.id].total_files }} 个文件 ·
+                {{ formatBytes(projectStats[project.id].total_bytes) }} ·
+                {{ topLanguages(projectStats[project.id]) }}
+              </small>
             </div>
             <div class="project-actions">
               <span class="status-badge" :data-status="project.status">{{ statusText[project.status] }}</span>
+              <button
+                v-if="project.status === 'pending' || project.status === 'failed'"
+                class="ingest-button"
+                type="button"
+                :disabled="ingestingProjectId === project.id"
+                @click="startIngestion(project)"
+              >
+                {{ ingestingProjectId === project.id ? '启动中' : project.status === 'failed' ? '重试' : '开始采集' }}
+              </button>
               <button
                 class="delete-button"
                 type="button"
