@@ -2,8 +2,8 @@
 
 RepoPilot 是一个面向多仓库研发团队的软件维护知识、故障诊断与 Agent 评测平台。
 
-当前仓库处于第三阶段：已完成仓库采集、可追溯知识切片，以及基于百炼
-Qwen3 Embedding 与 Qdrant 的语义检索链路。
+当前仓库处于第四阶段：已完成仓库采集、可追溯知识切片、语义检索，
+以及由 LangGraph 编排的 Qwen 流式 RAG 问答与引用校验链路。
 
 ## 目录
 
@@ -30,6 +30,9 @@ frontend/  Vue 3、TypeScript、Vite
 - 调用百炼 `text-embedding-v4` 生成 1024 维文本与代码向量
 - 使用 Qdrant 本地持久化模式按项目隔离向量
 - 通过知识检索页面返回带相似度、文件路径和行号的代码片段
+- 使用 LangGraph 编排“语义召回 → Qwen 生成 → 引用校验”工作流
+- 通过 `POST /api/v1/projects/{project_id}/rag/stream` 以 SSE 实时推送召回、Token 和校验事件
+- 生成中文仓库回答，并把 `[S编号]` 映射回真实文件与行号
 
 ## 本地启动
 
@@ -46,7 +49,7 @@ uvicorn repopilot.main:app --reload
 在 `backend/.env` 中配置百炼 API Key（该文件不会提交到 Git）：
 
 ```env
-REPOPILOT_EMBEDDING_API_KEY=你的百炼APIKey
+REPOPILOT_QWEN_API_KEY=你的百炼APIKey
 ```
 
 前端：

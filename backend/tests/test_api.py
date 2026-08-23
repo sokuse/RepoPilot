@@ -193,3 +193,32 @@ def test_vector_index_stats_require_ready_project() -> None:
     ready_response = client.get(f"/api/v1/projects/{created['id']}/index/stats")
     assert ready_response.status_code == 200
     assert ready_response.json()["ready"] is False
+
+
+def test_rag_stream_returns_sse_events(monkeypatch: pytest.MonkeyPatch) -> None:
+    created = create_project()
+    with TestingSessionLocal() as session:
+        project = session.get(Project, created["id"])
+        assert project is not None
+        project.status = "ready"
+        session.commit()
+
+    monkeypatch.setattr(
+        "repopilot.api.routes.rag.rag_service.stream",
+        lambda *_args: iter(
+            [
+                {"type": "token", "delta": "流式"},
+                {"type": "token", "delta": "回答"},
+            ]
+        ),
+    )
+
+    response = client.post(
+        f"/api/v1/projects/{created['id']}/rag/stream",
+        json={"question": "应用在哪里创建？", "retrieval_limit": 8},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert 'data: {"type":"token","delta":"流式"}' in response.text
+    assert 'data: {"type":"token","delta":"回答"}' in response.text

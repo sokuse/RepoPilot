@@ -41,10 +41,11 @@ class EmbeddingProvider(Protocol):
 
 class QwenApiEmbeddingProvider:
     def __init__(self) -> None:
-        if not settings.embedding_api_key:
+        api_key = settings.qwen_api_key
+        if not api_key:
             raise EmbeddingConfigurationError
         self.client = OpenAI(
-            api_key=settings.embedding_api_key,
+            api_key=api_key,
             base_url=settings.embedding_api_base_url,
         )
 

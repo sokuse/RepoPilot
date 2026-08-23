@@ -57,3 +57,41 @@ export interface SemanticSearchResponse {
   query: string
   results: SemanticSearchResult[]
 }
+
+export interface RagCitation {
+  source_id: string
+  chunk_id: string
+  source_path: string
+  start_line: number
+  end_line: number
+  symbol_name: string | null
+  score: number
+}
+
+export interface RagExecutionStep {
+  name: string
+  label: string
+  detail: string
+}
+
+export interface RagAnswerResponse {
+  project_id: string
+  question: string
+  answer: string
+  citations: RagCitation[]
+  retrieved_chunks: SemanticSearchResult[]
+  steps: RagExecutionStep[]
+  warnings: string[]
+}
+
+// 后端通过 SSE 依次发送召回结果、文本增量、工作流步骤和最终校验结果。
+export type RagStreamEvent =
+  | {
+      type: 'retrieval'
+      retrieved_chunks: SemanticSearchResult[]
+      step: RagExecutionStep
+    }
+  | { type: 'token'; delta: string }
+  | { type: 'step'; step: RagExecutionStep }
+  | { type: 'complete'; response: RagAnswerResponse }
+  | { type: 'error'; message: string }

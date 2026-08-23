@@ -4,6 +4,7 @@ import { onMounted, ref, watch } from 'vue'
 import { ApiError, projectApi } from '../services/api'
 import type {
   Project,
+  RagAnswerResponse,
   SemanticSearchResult,
   VectorIndexStats,
 } from '../types/project'
@@ -13,9 +14,11 @@ const selectedProjectId = ref('')
 const indexStats = ref<VectorIndexStats | null>(null)
 const query = ref('')
 const results = ref<SemanticSearchResult[]>([])
+const ragAnswer = ref<RagAnswerResponse | null>(null)
 const loading = ref(true)
 const indexing = ref(false)
 const searching = ref(false)
+const answering = ref(false)
 const errorMessage = ref('')
 
 async function loadProjects() {
@@ -34,6 +37,7 @@ async function loadProjects() {
 async function loadIndexStats() {
   indexStats.value = null
   results.value = []
+  ragAnswer.value = null
   if (!selectedProjectId.value) return
   try {
     indexStats.value = await projectApi.indexStats(selectedProjectId.value)
@@ -61,6 +65,7 @@ async function rebuildIndex() {
 async function searchKnowledge() {
   if (!selectedProjectId.value || !query.value.trim()) return
   searching.value = true
+  ragAnswer.value = null
   errorMessage.value = ''
   try {
     const response = await projectApi.semanticSearch(
@@ -78,6 +83,50 @@ async function searchKnowledge() {
   }
 }
 
+async function askKnowledge() {
+  if (!selectedProjectId.value || !query.value.trim()) return
+  const question = query.value.trim()
+  answering.value = true
+  errorMessage.value = ''
+  results.value = []
+  // 先创建空回答卡片，后续收到 token 时直接追加，形成打字机式展示。
+  ragAnswer.value = {
+    project_id: selectedProjectId.value,
+    question,
+    answer: '',
+    citations: [],
+    retrieved_chunks: [],
+    steps: [],
+    warnings: [],
+  }
+  try {
+    await projectApi.askRagStream(selectedProjectId.value, question, (event) => {
+      if (!ragAnswer.value) return
+      if (event.type === 'retrieval') {
+        results.value = event.retrieved_chunks
+        ragAnswer.value.retrieved_chunks = event.retrieved_chunks
+        ragAnswer.value.steps.push(event.step)
+      } else if (event.type === 'token') {
+        ragAnswer.value.answer += event.delta
+      } else if (event.type === 'step') {
+        ragAnswer.value.steps.push(event.step)
+      } else if (event.type === 'complete') {
+        ragAnswer.value = event.response
+        results.value = event.response.retrieved_chunks
+      }
+    })
+  } catch (error) {
+    errorMessage.value =
+      error instanceof ApiError && error.status === 409
+        ? '需要先为这个项目构建向量索引。'
+        : error instanceof ApiError && error.status === 502
+          ? error.message
+          : 'RAG 问答失败，请查看后端日志。'
+  } finally {
+    answering.value = false
+  }
+}
+
 watch(selectedProjectId, () => void loadIndexStats())
 onMounted(() => void loadProjects())
 </script>
@@ -88,9 +137,9 @@ onMounted(() => void loadProjects())
       <div>
         <p class="eyebrow">SEMANTIC RETRIEVAL</p>
         <h1>知识检索</h1>
-        <p>将自然语言问题转换为向量，从 Qdrant 找到语义最相关的代码与文档切片。</p>
+        <p>从 Qdrant 检索相关代码，再由 LangGraph 编排 Qwen 生成带真实引用的中文答案。</p>
       </div>
-      <div class="phase-pill">第三阶段 · Embedding</div>
+      <div class="phase-pill">第四阶段 · 流式 RAG</div>
     </header>
 
     <article class="panel retrieval-control">
@@ -125,23 +174,73 @@ onMounted(() => void loadProjects())
         </button>
       </div>
 
-      <form class="search-form" @submit.prevent="searchKnowledge">
+      <form class="search-form" @submit.prevent="askKnowledge">
         <input
           v-model="query"
           minlength="2"
           required
           placeholder="例如：项目是在哪里创建 FastAPI 应用的？"
         />
-        <button class="primary-button" type="submit" :disabled="!indexStats?.ready || searching">
-          {{ searching ? '检索中…' : '语义检索' }}
-        </button>
+        <div class="search-actions">
+          <button
+            class="secondary-button"
+            type="button"
+            :disabled="!indexStats?.ready || searching || answering"
+            @click="searchKnowledge"
+          >
+            {{ searching ? '检索中…' : '仅检索' }}
+          </button>
+          <button
+            class="primary-button"
+            type="submit"
+            :disabled="!indexStats?.ready || searching || answering"
+          >
+            {{ answering ? '正在流式生成…' : '生成回答' }}
+          </button>
+        </div>
       </form>
       <p v-if="errorMessage" class="error-banner">{{ errorMessage }}</p>
     </article>
 
+    <article v-if="ragAnswer" class="answer-panel">
+      <div class="answer-heading">
+        <div>
+          <p class="eyebrow">RAG ANSWER</p>
+          <h2>仓库回答</h2>
+        </div>
+        <span>{{ ragAnswer.citations.length }} 个有效引用</span>
+      </div>
+
+      <div class="workflow-steps">
+        <div v-for="(step, index) in ragAnswer.steps" :key="step.name" class="workflow-step">
+          <span>{{ index + 1 }}</span>
+          <div><strong>{{ step.label }}</strong><small>{{ step.detail }}</small></div>
+        </div>
+      </div>
+
+      <div :class="['answer-content', { streaming: answering }]">{{ ragAnswer.answer }}</div>
+      <p v-for="warning in ragAnswer.warnings" :key="warning" class="answer-warning">
+        {{ warning }}
+      </p>
+
+      <div v-if="ragAnswer.citations.length" class="citation-list">
+        <strong>引用来源</strong>
+        <div v-for="citation in ragAnswer.citations" :key="citation.source_id" class="citation-item">
+          <span>{{ citation.source_id }}</span>
+          <div>
+            <strong>{{ citation.source_path }}</strong>
+            <small>
+              第 {{ citation.start_line }}～{{ citation.end_line }} 行
+              <template v-if="citation.symbol_name"> · {{ citation.symbol_name }}</template>
+            </small>
+          </div>
+        </div>
+      </div>
+    </article>
+
     <div v-if="results.length" class="search-results">
       <div class="results-heading">
-        <p class="eyebrow">RETRIEVAL RESULTS</p>
+        <p class="eyebrow">RETRIEVAL EVIDENCE</p>
         <span>{{ results.length }} 条结果</span>
       </div>
       <article v-for="result in results" :key="result.chunk_id" class="result-card">
