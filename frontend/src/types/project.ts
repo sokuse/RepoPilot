@@ -31,3 +31,29 @@ export interface ChunkingStats {
   total_chars: number
   strategy_breakdown: Record<string, number>
 }
+
+export interface VectorIndexStats {
+  project_id: string
+  ready: boolean
+  embedding_model: string
+  vector_size: number
+  indexed_chunks: number
+  indexed_at: string | null
+}
+
+export interface SemanticSearchResult {
+  chunk_id: string
+  score: number
+  source_path: string
+  start_line: number
+  end_line: number
+  symbol_name: string | null
+  strategy: string
+  content: string
+}
+
+export interface SemanticSearchResponse {
+  project_id: string
+  query: string
+  results: SemanticSearchResult[]
+}

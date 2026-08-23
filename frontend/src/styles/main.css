@@ -7,7 +7,7 @@
 
 * { box-sizing: border-box; }
 body { margin: 0; min-width: 320px; min-height: 100vh; }
-button, input { font: inherit; }
+button, input, select { font: inherit; }
 
 .app-shell { display: grid; grid-template-columns: 248px 1fr; min-height: 100vh; }
 .sidebar {
@@ -131,12 +131,56 @@ button, input { font: inherit; }
 .delete-button:hover { background: #fff0ed; }
 .delete-button:disabled { cursor: wait; opacity: .55; }
 
+.knowledge-page { max-width: 1180px; }
+.retrieval-control { margin-top: 36px; }
+.project-selector {
+  display: grid; grid-template-columns: minmax(220px, .8fr) minmax(300px, 1.4fr) auto;
+  gap: 20px; align-items: end;
+}
+.project-selector label { display: grid; gap: 7px; color: #4f5e55; font-size: 13px; font-weight: 650; }
+.project-selector select, .search-form input {
+  width: 100%; padding: 12px 13px; border: 1px solid #ccd4ca; border-radius: 9px;
+  outline: none; color: #1d2921; background: #fff;
+}
+.project-selector select:focus, .search-form input:focus {
+  border-color: #73904f; box-shadow: 0 0 0 3px rgb(185 232 110 / 25%);
+}
+.index-summary { display: flex; gap: 11px; align-items: center; min-height: 43px; }
+.index-summary strong, .index-summary small { display: block; }
+.index-summary strong { color: #314239; font-size: 13px; }
+.index-summary small { margin-top: 3px; color: #829087; font-size: 11px; }
+.index-dot { width: 9px; height: 9px; flex: 0 0 auto; border-radius: 50%; background: #c9a55f; }
+.index-dot.ready { background: #63a973; box-shadow: 0 0 0 4px rgb(99 169 115 / 14%); }
+.index-button { white-space: nowrap; }
+.search-form { display: grid; grid-template-columns: 1fr auto; gap: 10px; margin-top: 24px; }
+.search-results { display: grid; gap: 12px; margin-top: 28px; }
+.results-heading { display: flex; justify-content: space-between; align-items: center; margin: 0 2px 4px; }
+.results-heading span { color: #748179; font-size: 12px; }
+.result-card {
+  overflow: hidden; border: 1px solid #d9ded6; border-radius: 14px; background: #fbfcf9;
+  box-shadow: 0 8px 24px rgb(29 54 39 / 4%);
+}
+.result-card header { display: flex; justify-content: space-between; gap: 16px; padding: 16px 18px; }
+.result-card header strong, .result-card header small { display: block; }
+.result-card header strong { color: #2f4637; font-size: 13px; }
+.result-card header small { margin-top: 4px; color: #819087; font-size: 11px; }
+.score { align-self: flex-start; padding: 5px 8px; border-radius: 999px; color: #376044; background: #e7f3e4; font-size: 11px; white-space: nowrap; }
+.result-card pre {
+  overflow-x: auto; max-height: 360px; margin: 0; padding: 17px 18px; color: #dceadd;
+  background: #18271e; font: 12px/1.65 "Cascadia Code", Consolas, monospace; white-space: pre-wrap;
+}
+.retrieval-empty {
+  display: grid; min-height: 250px; place-items: center; padding: 30px; color: #849087;
+  text-align: center;
+}
+
 @media (max-width: 960px) {
   .app-shell { grid-template-columns: 1fr; }
   .sidebar { position: static; height: auto; padding: 18px 24px; }
   .nav-list { display: flex; overflow-x: auto; margin-top: 18px; }
   .sidebar-status { display: none; }
   .content-grid { grid-template-columns: 1fr; }
+  .project-selector { grid-template-columns: 1fr; align-items: stretch; }
 }
 
 @media (max-width: 640px) {

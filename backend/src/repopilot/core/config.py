@@ -26,6 +26,13 @@ class Settings(BaseSettings):
     max_scanned_file_size_bytes: int = 1_000_000
     chunk_size_chars: int = 1_500
     chunk_overlap_chars: int = 200
+    vector_database_path: Path = BACKEND_DIR / "data" / "qdrant"
+    embedding_model_name: str = "text-embedding-v4"
+    embedding_api_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    embedding_api_key: str | None = None
+    embedding_dimensions: int = 1_024
+    vector_collection_name: str = "repopilot_chunks"
+    embedding_batch_size: int = 10
 
 
 @lru_cache

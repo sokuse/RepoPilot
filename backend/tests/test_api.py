@@ -12,6 +12,7 @@ from repopilot.main import app
 from repopilot.models.knowledge_chunk import KnowledgeChunk
 from repopilot.models.project import Project
 from repopilot.models.repository_file import RepositoryFile
+from repopilot.models.vector_index_state import VectorIndexState
 
 test_engine = create_engine(
     "sqlite://",
@@ -34,6 +35,7 @@ client = TestClient(app)
 @pytest.fixture(autouse=True)
 def clean_database() -> Generator[None, None, None]:
     with TestingSessionLocal() as session:
+        session.execute(delete(VectorIndexState))
         session.execute(delete(KnowledgeChunk))
         session.execute(delete(RepositoryFile))
         session.execute(delete(Project))
@@ -174,3 +176,20 @@ def test_build_and_list_traceable_chunks(
     # 重建应覆盖派生数据，而不是在每次点击后重复追加。
     second_build = client.post(f"/api/v1/projects/{project_id}/chunks")
     assert second_build.json()["total_chunks"] == 2
+
+
+def test_vector_index_stats_require_ready_project() -> None:
+    created = create_project()
+
+    pending_response = client.get(f"/api/v1/projects/{created['id']}/index/stats")
+    assert pending_response.status_code == 409
+
+    with TestingSessionLocal() as session:
+        project = session.get(Project, created["id"])
+        assert project is not None
+        project.status = "ready"
+        session.commit()
+
+    ready_response = client.get(f"/api/v1/projects/{created['id']}/index/stats")
+    assert ready_response.status_code == 200
+    assert ready_response.json()["ready"] is False

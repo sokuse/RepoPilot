@@ -11,6 +11,7 @@ from repopilot.core.config import settings
 from repopilot.models.knowledge_chunk import KnowledgeChunk
 from repopilot.models.project import Project
 from repopilot.models.repository_file import RepositoryFile
+from repopilot.models.vector_index_state import VectorIndexState
 from repopilot.schemas.chunk import ChunkingStatsResponse, KnowledgeChunkResponse
 
 MARKDOWN_HEADING = re.compile(r"^(#{1,6})\s+(.+?)\s*$")
@@ -224,6 +225,10 @@ class ChunkingService:
 
         # Chunk 属于可重复生成的派生数据，重建时先清理旧结果，防止内容更新后残留脏数据。
         session.execute(delete(KnowledgeChunk).where(KnowledgeChunk.project_id == project.id))
+        # 切片内容变化后旧向量不可再被使用，必须显式重新构建索引。
+        session.execute(
+            delete(VectorIndexState).where(VectorIndexState.project_id == project.id)
+        )
         for repository_file in files:
             source_path = (repository_root / repository_file.path).resolve()
             if not source_path.is_relative_to(repository_root) or not source_path.is_file():

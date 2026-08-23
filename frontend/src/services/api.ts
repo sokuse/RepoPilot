@@ -1,4 +1,11 @@
-import type { ChunkingStats, Project, ProjectCreate, RepositoryStats } from '../types/project'
+import type {
+  ChunkingStats,
+  Project,
+  ProjectCreate,
+  RepositoryStats,
+  SemanticSearchResponse,
+  VectorIndexStats,
+} from '../types/project'
 
 const API_PREFIX = '/api/v1'
 
@@ -41,4 +48,13 @@ export const projectApi = {
     request<ChunkingStats>(`/projects/${projectId}/chunks/stats`),
   rebuildChunks: (projectId: string) =>
     request<ChunkingStats>(`/projects/${projectId}/chunks`, { method: 'POST' }),
+  indexStats: (projectId: string) =>
+    request<VectorIndexStats>(`/projects/${projectId}/index/stats`),
+  rebuildIndex: (projectId: string) =>
+    request<VectorIndexStats>(`/projects/${projectId}/index`, { method: 'POST' }),
+  semanticSearch: (projectId: string, query: string, limit = 5) =>
+    request<SemanticSearchResponse>(`/projects/${projectId}/index/search`, {
+      method: 'POST',
+      body: JSON.stringify({ query, limit }),
+    }),
 }
