@@ -74,7 +74,14 @@ export interface RagExecutionStep {
   detail: string
 }
 
+export interface RagTokenUsage {
+  prompt_tokens: number
+  completion_tokens: number
+  total_tokens: number
+}
+
 export interface RagAnswerResponse {
+  run_id: string | null
   project_id: string
   question: string
   answer: string
@@ -82,10 +89,40 @@ export interface RagAnswerResponse {
   retrieved_chunks: SemanticSearchResult[]
   steps: RagExecutionStep[]
   warnings: string[]
+  usage: RagTokenUsage
+  duration_ms: number
+}
+
+export interface RagRunSummary {
+  id: string
+  project_id: string
+  question: string
+  status: 'running' | 'completed' | 'failed'
+  chat_model: string
+  embedding_model: string
+  retrieval_limit: number
+  retrieved_count: number
+  citation_count: number
+  prompt_tokens: number
+  completion_tokens: number
+  total_tokens: number
+  duration_ms: number
+  created_at: string
+  completed_at: string | null
+}
+
+export interface RagRunDetail extends RagRunSummary {
+  answer: string
+  retrieved_chunks: SemanticSearchResult[]
+  citations: RagCitation[]
+  steps: RagExecutionStep[]
+  warnings: string[]
+  error_message: string | null
 }
 
 // 后端通过 SSE 依次发送召回结果、文本增量、工作流步骤和最终校验结果。
 export type RagStreamEvent =
+  | { type: 'run'; run_id: string }
   | {
       type: 'retrieval'
       retrieved_chunks: SemanticSearchResult[]

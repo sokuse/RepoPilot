@@ -1,24 +1,46 @@
 from uuid import uuid4
 
+import pytest
+
+from repopilot.schemas.rag import RagTokenUsage
 from repopilot.schemas.retrieval import SemanticSearchResponse, SemanticSearchResult
-from repopilot.services.rag_service import RagService
+from repopilot.services.rag_run_service import rag_run_service
+from repopilot.services.rag_service import ChatAnswer, ChatStreamPart, RagService
 
 
 class FakeChatProvider:
     def __init__(self, answer: str) -> None:
         self.answer_text = answer
 
-    def answer(self, _question: str, context: str) -> str:
+    def answer(self, _question: str, context: str) -> ChatAnswer:
         assert "[S1]" in context
         assert "src/app.py" in context
-        return self.answer_text
+        return ChatAnswer(
+            text=self.answer_text,
+            usage=RagTokenUsage(prompt_tokens=40, completion_tokens=12, total_tokens=52),
+        )
 
     def stream_answer(self, _question: str, context: str):
         assert "[S1]" in context
         assert "src/app.py" in context
         midpoint = len(self.answer_text) // 2
-        yield self.answer_text[:midpoint]
-        yield self.answer_text[midpoint:]
+        yield ChatStreamPart(delta=self.answer_text[:midpoint])
+        yield ChatStreamPart(delta=self.answer_text[midpoint:])
+        yield ChatStreamPart(
+            usage=RagTokenUsage(prompt_tokens=40, completion_tokens=12, total_tokens=52)
+        )
+
+
+@pytest.fixture(autouse=True)
+def fake_run_tracking(monkeypatch: pytest.MonkeyPatch) -> None:
+    """图单测只关心编排逻辑，运行记录持久化由独立测试覆盖。"""
+
+    class FakeRun:
+        id = str(uuid4())
+
+    monkeypatch.setattr(rag_run_service, "start", lambda *_args: FakeRun())
+    monkeypatch.setattr(rag_run_service, "complete", lambda *_args: None)
+    monkeypatch.setattr(rag_run_service, "fail", lambda *_args: None)
 
 
 def fake_search(_session, project_id, query, _limit, _threshold):
@@ -57,6 +79,8 @@ def test_rag_graph_generates_and_validates_citations(monkeypatch) -> None:
     assert response.citations[0].source_path == "src/app.py"
     assert [step.name for step in response.steps] == ["retrieve", "generate", "validate"]
     assert response.warnings == []
+    assert response.usage.total_tokens == 52
+    assert response.run_id is not None
 
 
 def test_rag_graph_warns_when_answer_has_no_valid_citation(monkeypatch) -> None:
@@ -88,6 +112,7 @@ def test_rag_graph_streams_tokens_and_final_validated_response(monkeypatch) -> N
     events = list(RagService.stream(None, str(uuid4()), "应用在哪里创建？", 8))
 
     assert [event["type"] for event in events] == [
+        "run",
         "retrieval",
         "token",
         "token",
@@ -99,6 +124,7 @@ def test_rag_graph_streams_tokens_and_final_validated_response(monkeypatch) -> N
     )
     final_response = events[-1]["response"]
     assert final_response["citations"][0]["source_path"] == "src/app.py"
+    assert final_response["usage"]["total_tokens"] == 52
     assert [step["name"] for step in final_response["steps"]] == [
         "retrieve",
         "generate",

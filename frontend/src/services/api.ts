@@ -3,6 +3,8 @@ import type {
   Project,
   ProjectCreate,
   RagAnswerResponse,
+  RagRunDetail,
+  RagRunSummary,
   RagStreamEvent,
   RepositoryStats,
   SemanticSearchResponse,
@@ -96,6 +98,10 @@ export const projectApi = {
       method: 'POST',
       body: JSON.stringify({ question, retrieval_limit: retrievalLimit }),
     }),
+  listRagRuns: (projectId: string, limit = 20) =>
+    request<RagRunSummary[]>(`/projects/${projectId}/rag/runs?limit=${limit}`),
+  getRagRun: (projectId: string, runId: string) =>
+    request<RagRunDetail>(`/projects/${projectId}/rag/runs/${runId}`),
   askRagStream: async (
     projectId: string,
     question: string,

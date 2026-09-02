@@ -5,6 +5,7 @@ import { ApiError, projectApi } from '../services/api'
 import type {
   Project,
   RagAnswerResponse,
+  RagRunSummary,
   SemanticSearchResult,
   VectorIndexStats,
 } from '../types/project'
@@ -15,10 +16,12 @@ const indexStats = ref<VectorIndexStats | null>(null)
 const query = ref('')
 const results = ref<SemanticSearchResult[]>([])
 const ragAnswer = ref<RagAnswerResponse | null>(null)
+const ragRuns = ref<RagRunSummary[]>([])
 const loading = ref(true)
 const indexing = ref(false)
 const searching = ref(false)
 const answering = ref(false)
+const loadingRunId = ref<string | null>(null)
 const errorMessage = ref('')
 
 async function loadProjects() {
@@ -43,6 +46,16 @@ async function loadIndexStats() {
     indexStats.value = await projectApi.indexStats(selectedProjectId.value)
   } catch {
     errorMessage.value = '无法读取向量索引状态。'
+  }
+}
+
+async function loadRagRuns() {
+  ragRuns.value = []
+  if (!selectedProjectId.value) return
+  try {
+    ragRuns.value = await projectApi.listRagRuns(selectedProjectId.value)
+  } catch {
+    errorMessage.value = '无法读取 RAG 问答历史。'
   }
 }
 
@@ -91,6 +104,7 @@ async function askKnowledge() {
   results.value = []
   // 先创建空回答卡片，后续收到 token 时直接追加，形成打字机式展示。
   ragAnswer.value = {
+    run_id: null,
     project_id: selectedProjectId.value,
     question,
     answer: '',
@@ -98,11 +112,15 @@ async function askKnowledge() {
     retrieved_chunks: [],
     steps: [],
     warnings: [],
+    usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+    duration_ms: 0,
   }
   try {
     await projectApi.askRagStream(selectedProjectId.value, question, (event) => {
       if (!ragAnswer.value) return
-      if (event.type === 'retrieval') {
+      if (event.type === 'run') {
+        ragAnswer.value.run_id = event.run_id
+      } else if (event.type === 'retrieval') {
         results.value = event.retrieved_chunks
         ragAnswer.value.retrieved_chunks = event.retrieved_chunks
         ragAnswer.value.steps.push(event.step)
@@ -124,10 +142,58 @@ async function askKnowledge() {
           : 'RAG 问答失败，请查看后端日志。'
   } finally {
     answering.value = false
+    // 成功与失败都刷新，失败的执行记录同样需要可追溯。
+    void loadRagRuns()
   }
 }
 
-watch(selectedProjectId, () => void loadIndexStats())
+async function openRagRun(run: RagRunSummary) {
+  if (!selectedProjectId.value) return
+  loadingRunId.value = run.id
+  errorMessage.value = ''
+  try {
+    const detail = await projectApi.getRagRun(selectedProjectId.value, run.id)
+    if (detail.status === 'failed') {
+      errorMessage.value = detail.error_message ?? '这次 RAG 运行失败了。'
+      return
+    }
+    ragAnswer.value = {
+      run_id: detail.id,
+      project_id: detail.project_id,
+      question: detail.question,
+      answer: detail.answer,
+      citations: detail.citations,
+      retrieved_chunks: detail.retrieved_chunks,
+      steps: detail.steps,
+      warnings: detail.warnings,
+      usage: {
+        prompt_tokens: detail.prompt_tokens,
+        completion_tokens: detail.completion_tokens,
+        total_tokens: detail.total_tokens,
+      },
+      duration_ms: detail.duration_ms,
+    }
+    query.value = detail.question
+    results.value = detail.retrieved_chunks
+  } catch {
+    errorMessage.value = '无法读取这次 RAG 运行详情。'
+  } finally {
+    loadingRunId.value = null
+  }
+}
+
+function formatDuration(durationMs: number) {
+  return durationMs ? `${(durationMs / 1000).toFixed(1)} 秒` : '—'
+}
+
+function formatRunStatus(status: RagRunSummary['status']) {
+  return { running: '执行中', completed: '已完成', failed: '失败' }[status] ?? status
+}
+
+watch(selectedProjectId, () => {
+  void loadIndexStats()
+  void loadRagRuns()
+})
 onMounted(() => void loadProjects())
 </script>
 
@@ -202,13 +268,42 @@ onMounted(() => void loadProjects())
       <p v-if="errorMessage" class="error-banner">{{ errorMessage }}</p>
     </article>
 
+    <article class="panel rag-history-panel">
+      <div class="panel-heading">
+        <div><p class="eyebrow">EXECUTION HISTORY</p><h2>问答追踪</h2></div>
+        <button class="text-button" type="button" @click="loadRagRuns">刷新</button>
+      </div>
+      <p v-if="!ragRuns.length" class="history-empty">完成一次“生成回答”后，这里会保存执行记录。</p>
+      <div v-else class="rag-run-list">
+        <button
+          v-for="run in ragRuns"
+          :key="run.id"
+          class="rag-run-item"
+          type="button"
+          :disabled="loadingRunId === run.id"
+          @click="openRagRun(run)"
+        >
+          <span class="run-status" :data-status="run.status">{{ formatRunStatus(run.status) }}</span>
+          <span class="run-question">{{ run.question }}</span>
+          <small>
+            {{ run.chat_model }} · {{ run.total_tokens }} tokens ·
+            {{ formatDuration(run.duration_ms) }} · {{ run.citation_count }} 引用
+          </small>
+          <time>{{ new Date(run.created_at).toLocaleString() }}</time>
+        </button>
+      </div>
+    </article>
+
     <article v-if="ragAnswer" class="answer-panel">
       <div class="answer-heading">
         <div>
           <p class="eyebrow">RAG ANSWER</p>
           <h2>仓库回答</h2>
         </div>
-        <span>{{ ragAnswer.citations.length }} 个有效引用</span>
+        <span>
+          {{ ragAnswer.usage.total_tokens }} tokens · {{ formatDuration(ragAnswer.duration_ms) }} ·
+          {{ ragAnswer.citations.length }} 个有效引用
+        </span>
       </div>
 
       <div class="workflow-steps">

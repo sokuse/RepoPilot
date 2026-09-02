@@ -2,8 +2,8 @@
 
 RepoPilot 是一个面向多仓库研发团队的软件维护知识、故障诊断与 Agent 评测平台。
 
-当前仓库处于第四阶段：已完成仓库采集、可追溯知识切片、语义检索，
-以及由 LangGraph 编排的 Qwen 流式 RAG 问答与引用校验链路。
+当前仓库处于第五阶段：已完成仓库采集、可追溯知识切片、语义检索，
+以及由 LangGraph 编排的 Qwen 流式 RAG 问答、引用校验与执行历史追踪链路。
 
 ## 目录
 
@@ -33,6 +33,10 @@ frontend/  Vue 3、TypeScript、Vite
 - 使用 LangGraph 编排“语义召回 → Qwen 生成 → 引用校验”工作流
 - 通过 `POST /api/v1/projects/{project_id}/rag/stream` 以 SSE 实时推送召回、Token 和校验事件
 - 生成中文仓库回答，并把 `[S编号]` 映射回真实文件与行号
+- 将每次问答的状态、模型、耗时和 Token 用量持久化到 SQLite
+- 保存回答当时的检索切片、引用和 LangGraph 步骤快照，避免重建索引后旧依据丢失
+- 通过 `GET /api/v1/projects/{project_id}/rag/runs` 查询运行历史，并可读取单次运行详情
+- 在知识检索页面回看已完成或失败的 RAG 运行记录
 
 ## 本地启动
 

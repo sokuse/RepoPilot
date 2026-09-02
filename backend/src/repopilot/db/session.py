@@ -40,6 +40,7 @@ def create_database_tables() -> None:
     from repopilot.models import (  # noqa: F401
         knowledge_chunk,
         project,
+        rag_run,
         repository_file,
         vector_index_state,
     )

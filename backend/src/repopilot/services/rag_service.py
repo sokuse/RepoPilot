@@ -1,7 +1,10 @@
 import re
 from collections.abc import Iterator
+from dataclasses import dataclass
 from functools import lru_cache
+from time import perf_counter
 from typing import Protocol, TypedDict
+from uuid import UUID
 
 from langgraph.config import get_stream_writer
 from langgraph.graph import END, START, StateGraph
@@ -9,8 +12,14 @@ from openai import OpenAI
 from sqlalchemy.orm import Session
 
 from repopilot.core.config import settings
-from repopilot.schemas.rag import RagAnswerResponse, RagCitation, RagExecutionStep
+from repopilot.schemas.rag import (
+    RagAnswerResponse,
+    RagCitation,
+    RagExecutionStep,
+    RagTokenUsage,
+)
 from repopilot.schemas.retrieval import SemanticSearchResult
+from repopilot.services.rag_run_service import rag_run_service
 from repopilot.services.vector_search_service import vector_search_service
 
 SOURCE_REFERENCE = re.compile(r"\[S(\d+)]")
@@ -20,10 +29,22 @@ class ChatConfigurationError(Exception):
     """Qwen 对话模型所需的 API Key 尚未配置。"""
 
 
-class ChatProvider(Protocol):
-    def answer(self, question: str, context: str) -> str: ...
+@dataclass(frozen=True)
+class ChatAnswer:
+    text: str
+    usage: RagTokenUsage
 
-    def stream_answer(self, question: str, context: str) -> Iterator[str]: ...
+
+@dataclass(frozen=True)
+class ChatStreamPart:
+    delta: str = ""
+    usage: RagTokenUsage | None = None
+
+
+class ChatProvider(Protocol):
+    def answer(self, question: str, context: str) -> ChatAnswer: ...
+
+    def stream_answer(self, question: str, context: str) -> Iterator[ChatStreamPart]: ...
 
 
 class QwenChatProvider:
@@ -54,29 +75,45 @@ class QwenChatProvider:
             },
         ]
 
-    def answer(self, question: str, context: str) -> str:
+    @staticmethod
+    def _usage(usage) -> RagTokenUsage:
+        if usage is None:
+            return RagTokenUsage()
+        return RagTokenUsage(
+            prompt_tokens=usage.prompt_tokens or 0,
+            completion_tokens=usage.completion_tokens or 0,
+            total_tokens=usage.total_tokens or 0,
+        )
+
+    def answer(self, question: str, context: str) -> ChatAnswer:
         response = self.client.chat.completions.create(
             model=settings.chat_model_name,
             temperature=settings.rag_temperature,
             messages=self._messages(question, context),
         )
         content = response.choices[0].message.content
-        return content.strip() if content else "模型没有返回可用答案。"
+        return ChatAnswer(
+            text=content.strip() if content else "模型没有返回可用答案。",
+            usage=self._usage(response.usage),
+        )
 
-    def stream_answer(self, question: str, context: str) -> Iterator[str]:
+    def stream_answer(self, question: str, context: str) -> Iterator[ChatStreamPart]:
         # 百炼兼容 OpenAI 流式协议，每个 chunk 只携带本次新增的文本。
         stream = self.client.chat.completions.create(
             model=settings.chat_model_name,
             temperature=settings.rag_temperature,
             messages=self._messages(question, context),
             stream=True,
+            stream_options={"include_usage": True},
         )
         for chunk in stream:
+            if chunk.usage is not None:
+                yield ChatStreamPart(usage=self._usage(chunk.usage))
             if not chunk.choices:
                 continue
             content = chunk.choices[0].delta.content
             if content:
-                yield content
+                yield ChatStreamPart(delta=content)
 
 
 @lru_cache
@@ -96,8 +133,10 @@ class RagState(TypedDict, total=False):
     steps: list[RagExecutionStep]
     warnings: list[str]
     stream_tokens: bool
+    usage: RagTokenUsage
 
 
+# 语义召回，负责检索并添加上下文。
 def retrieve_node(state: RagState) -> dict[str, object]:
     response = vector_search_service.search(
         state["session"],
@@ -143,17 +182,24 @@ def retrieve_node(state: RagState) -> dict[str, object]:
     }
 
 
+# 根据召回上下文生成回答，并记录模型返回的 Token 用量。
 def generate_node(state: RagState) -> dict[str, object]:
     provider = get_chat_provider()
     if state.get("stream_tokens"):
         writer = get_stream_writer()
         answer_parts: list[str] = []
-        for delta in provider.stream_answer(state["question"], state["context"]):
-            answer_parts.append(delta)
-            writer({"type": "token", "delta": delta})
+        usage = RagTokenUsage()
+        for part in provider.stream_answer(state["question"], state["context"]):
+            if part.delta:
+                answer_parts.append(part.delta)
+                writer({"type": "token", "delta": part.delta})
+            if part.usage is not None:
+                usage = part.usage
         answer = "".join(answer_parts).strip() or "模型没有返回可用答案。"
     else:
-        answer = provider.answer(state["question"], state["context"])
+        result = provider.answer(state["question"], state["context"])
+        answer = result.text
+        usage = result.usage
 
     step = RagExecutionStep(
         name="generate",
@@ -165,10 +211,12 @@ def generate_node(state: RagState) -> dict[str, object]:
 
     return {
         "answer": answer,
+        "usage": usage,
         "steps": [*state.get("steps", []), step],
     }
 
 
+# 校验模型引用，并添加可信引用和警告。
 def validate_node(state: RagState) -> dict[str, object]:
     chunks = state["retrieved_chunks"]
     referenced_indexes = {
@@ -207,6 +255,7 @@ def validate_node(state: RagState) -> dict[str, object]:
             retrieved_chunks=chunks,
             steps=steps,
             warnings=warnings,
+            usage=state.get("usage", RagTokenUsage()),
         )
         writer = get_stream_writer()
         writer({"type": "complete", "response": response.model_dump(mode="json")})
@@ -241,25 +290,41 @@ class RagService:
         question: str,
         retrieval_limit: int,
     ) -> RagAnswerResponse:
-        result = rag_graph.invoke(
-            {
-                "session": session,
-                "project_id": project_id,
-                "question": question,
-                "retrieval_limit": retrieval_limit,
-                "steps": [],
-                "warnings": [],
-            }
-        )
-        return RagAnswerResponse(
-            project_id=project_id,
-            question=question,
-            answer=result["answer"],
-            citations=result.get("citations", []),
-            retrieved_chunks=result["retrieved_chunks"],
-            steps=result.get("steps", []),
-            warnings=result.get("warnings", []),
-        )
+        run = rag_run_service.start(session, project_id, question, retrieval_limit)
+        started = perf_counter()
+        try:
+            result = rag_graph.invoke(
+                {
+                    "session": session,
+                    "project_id": project_id,
+                    "question": question,
+                    "retrieval_limit": retrieval_limit,
+                    "steps": [],
+                    "warnings": [],
+                }
+            )
+            response = RagAnswerResponse(
+                run_id=run.id,
+                project_id=project_id,
+                question=question,
+                answer=result["answer"],
+                citations=result.get("citations", []),
+                retrieved_chunks=result["retrieved_chunks"],
+                steps=result.get("steps", []),
+                warnings=result.get("warnings", []),
+                usage=result.get("usage", RagTokenUsage()),
+                duration_ms=int((perf_counter() - started) * 1000),
+            )
+            rag_run_service.complete(session, run.id, response)
+            return response
+        except Exception as error:
+            rag_run_service.fail(
+                session,
+                run.id,
+                error,
+                int((perf_counter() - started) * 1000),
+            )
+            raise
 
     @staticmethod
     def stream(
@@ -269,21 +334,44 @@ class RagService:
         retrieval_limit: int,
     ) -> Iterator[dict[str, object]]:
         """运行同一张 LangGraph，并向 HTTP 层逐个产出自定义流事件。"""
-        for part in rag_graph.stream(
-            {
-                "session": session,
-                "project_id": project_id,
-                "question": question,
-                "retrieval_limit": retrieval_limit,
-                "steps": [],
-                "warnings": [],
-                "stream_tokens": True,
-            },
-            stream_mode="custom",
-            version="v2",
-        ):
-            if part["type"] == "custom":
-                yield part["data"]
+        run = rag_run_service.start(session, project_id, question, retrieval_limit)
+        started = perf_counter()
+        yield {"type": "run", "run_id": run.id}
+        try:
+            for part in rag_graph.stream(
+                {
+                    "session": session,
+                    "project_id": project_id,
+                    "question": question,
+                    "retrieval_limit": retrieval_limit,
+                    "steps": [],
+                    "warnings": [],
+                    "stream_tokens": True,
+                },
+                stream_mode="custom",
+                version="v2",
+            ):
+                if part["type"] != "custom":
+                    continue
+                event = part["data"]
+                if event.get("type") == "complete":
+                    response = RagAnswerResponse.model_validate(event["response"]).model_copy(
+                        update={
+                            "run_id": UUID(run.id),
+                            "duration_ms": int((perf_counter() - started) * 1000),
+                        }
+                    )
+                    rag_run_service.complete(session, run.id, response)
+                    event = {"type": "complete", "response": response.model_dump(mode="json")}
+                yield event
+        except Exception as error:
+            rag_run_service.fail(
+                session,
+                run.id,
+                error,
+                int((perf_counter() - started) * 1000),
+            )
+            raise
 
 
 rag_service = RagService()

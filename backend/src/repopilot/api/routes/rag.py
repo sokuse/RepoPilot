@@ -3,13 +3,19 @@ import logging
 from collections.abc import Iterator
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 from openai import APIError
 
 from repopilot.db.session import SessionDep
-from repopilot.schemas.rag import RagAnswerResponse, RagAskRequest
+from repopilot.schemas.rag import (
+    RagAnswerResponse,
+    RagAskRequest,
+    RagRunDetail,
+    RagRunSummary,
+)
 from repopilot.services.project_service import project_service
+from repopilot.services.rag_run_service import rag_run_service
 from repopilot.services.rag_service import (
     ChatConfigurationError,
     rag_service,
@@ -33,12 +39,7 @@ def _stream_error(message: str) -> str:
     return _stream_event({"type": "error", "message": message})
 
 
-@router.post("/ask", response_model=RagAnswerResponse)
-def ask_repository(
-    project_id: UUID,
-    payload: RagAskRequest,
-    session: SessionDep,
-) -> RagAnswerResponse:
+def _get_ready_project(project_id: UUID, session: SessionDep):
     project = project_service.get(session, str(project_id))
     if project is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
@@ -47,6 +48,16 @@ def ask_repository(
             status_code=status.HTTP_409_CONFLICT,
             detail="Repository must be ingested before asking questions",
         )
+    return project
+
+
+@router.post("/ask", response_model=RagAnswerResponse)
+def ask_repository(
+    project_id: UUID,
+    payload: RagAskRequest,
+    session: SessionDep,
+) -> RagAnswerResponse:
+    project = _get_ready_project(project_id, session)
 
     try:
         return rag_service.ask(
@@ -79,14 +90,7 @@ def stream_repository_answer(
     payload: RagAskRequest,
     session: SessionDep,
 ) -> StreamingResponse:
-    project = project_service.get(session, str(project_id))
-    if project is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
-    if project.status != "ready":
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Repository must be ingested before asking questions",
-        )
+    project = _get_ready_project(project_id, session)
 
     def events() -> Iterator[str]:
         try:
@@ -117,3 +121,27 @@ def stream_repository_answer(
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@router.get("/runs", response_model=list[RagRunSummary])
+def list_repository_runs(
+    project_id: UUID,
+    session: SessionDep,
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=20, ge=1, le=100),
+) -> list[RagRunSummary]:
+    _get_ready_project(project_id, session)
+    return rag_run_service.list(session, str(project_id), offset, limit)
+
+
+@router.get("/runs/{run_id}", response_model=RagRunDetail)
+def get_repository_run(
+    project_id: UUID,
+    run_id: UUID,
+    session: SessionDep,
+) -> RagRunDetail:
+    _get_ready_project(project_id, session)
+    run = rag_run_service.get(session, str(project_id), str(run_id))
+    if run is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="RAG run not found")
+    return run

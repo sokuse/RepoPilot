@@ -1,4 +1,5 @@
 from collections.abc import Generator
+from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
@@ -11,8 +12,12 @@ from repopilot.db.session import get_session
 from repopilot.main import app
 from repopilot.models.knowledge_chunk import KnowledgeChunk
 from repopilot.models.project import Project
+from repopilot.models.rag_run import RagRun
 from repopilot.models.repository_file import RepositoryFile
 from repopilot.models.vector_index_state import VectorIndexState
+from repopilot.schemas.rag import RagAnswerResponse, RagExecutionStep, RagTokenUsage
+from repopilot.schemas.retrieval import SemanticSearchResult
+from repopilot.services.rag_run_service import rag_run_service
 
 test_engine = create_engine(
     "sqlite://",
@@ -35,6 +40,7 @@ client = TestClient(app)
 @pytest.fixture(autouse=True)
 def clean_database() -> Generator[None, None, None]:
     with TestingSessionLocal() as session:
+        session.execute(delete(RagRun))
         session.execute(delete(VectorIndexState))
         session.execute(delete(KnowledgeChunk))
         session.execute(delete(RepositoryFile))
@@ -222,3 +228,55 @@ def test_rag_stream_returns_sse_events(monkeypatch: pytest.MonkeyPatch) -> None:
     assert response.headers["content-type"].startswith("text/event-stream")
     assert 'data: {"type":"token","delta":"流式"}' in response.text
     assert 'data: {"type":"token","delta":"回答"}' in response.text
+
+
+def test_list_and_get_rag_run_history() -> None:
+    created = create_project()
+    with TestingSessionLocal() as session:
+        project = session.get(Project, created["id"])
+        assert project is not None
+        project.status = "ready"
+        session.commit()
+        run = rag_run_service.start(session, created["id"], "应用在哪里创建？", 8)
+        chunk = SemanticSearchResult(
+            chunk_id=uuid4(),
+            score=0.88,
+            source_path="src/app.py",
+            start_line=10,
+            end_line=18,
+            symbol_name="create_app",
+            strategy="python_ast",
+            content="def create_app(): ...",
+        )
+        rag_run_service.complete(
+            session,
+            run.id,
+            RagAnswerResponse(
+                run_id=run.id,
+                project_id=created["id"],
+                question="应用在哪里创建？",
+                answer="应用在工厂函数中创建。[S1]",
+                citations=[],
+                retrieved_chunks=[chunk],
+                steps=[RagExecutionStep(name="retrieve", label="语义召回", detail="1 个")],
+                warnings=[],
+                usage=RagTokenUsage(
+                    prompt_tokens=40,
+                    completion_tokens=12,
+                    total_tokens=52,
+                ),
+                duration_ms=850,
+            ),
+        )
+        run_id = run.id
+
+    list_response = client.get(f"/api/v1/projects/{created['id']}/rag/runs")
+    assert list_response.status_code == 200
+    assert list_response.json()[0]["total_tokens"] == 52
+
+    detail_response = client.get(
+        f"/api/v1/projects/{created['id']}/rag/runs/{run_id}"
+    )
+    assert detail_response.status_code == 200
+    assert detail_response.json()["answer"].startswith("应用在工厂函数中创建")
+    assert detail_response.json()["retrieved_chunks"][0]["source_path"] == "src/app.py"
