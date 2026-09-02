@@ -15,6 +15,7 @@ from repopilot.models.project import Project
 from repopilot.models.rag_run import RagRun
 from repopilot.models.repository_file import RepositoryFile
 from repopilot.models.vector_index_state import VectorIndexState
+from repopilot.schemas.diagnosis import DiagnosisResponse, ToolCallTrace
 from repopilot.schemas.rag import RagAnswerResponse, RagExecutionStep, RagTokenUsage
 from repopilot.schemas.retrieval import SemanticSearchResult
 from repopilot.services.rag_run_service import rag_run_service
@@ -280,3 +281,46 @@ def test_list_and_get_rag_run_history() -> None:
     assert detail_response.status_code == 200
     assert detail_response.json()["answer"].startswith("应用在工厂函数中创建")
     assert detail_response.json()["retrieved_chunks"][0]["source_path"] == "src/app.py"
+
+
+def test_repository_diagnosis_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
+    created = create_project()
+    with TestingSessionLocal() as session:
+        project = session.get(Project, created["id"])
+        assert project is not None
+        project.status = "ready"
+        session.commit()
+
+    monkeypatch.setattr(
+        "repopilot.api.routes.diagnosis.diagnosis_service.diagnose",
+        lambda _session, project_id, question, _max_iterations: DiagnosisResponse(
+            project_id=project_id,
+            question=question,
+            answer="错误通过 SSE error 事件传递。",
+            model="qwen-test",
+            iterations=2,
+            duration_ms=120,
+            usage=RagTokenUsage(prompt_tokens=30, completion_tokens=8, total_tokens=38),
+            tool_calls=[
+                ToolCallTrace(
+                    call_id="call-1",
+                    name="semantic_search",
+                    arguments={"query": "错误传递"},
+                    summary="语义检索返回 1 个相关切片",
+                    result='{"count": 1}',
+                    success=True,
+                    duration_ms=3,
+                )
+            ],
+            warnings=[],
+        ),
+    )
+
+    response = client.post(
+        f"/api/v1/projects/{created['id']}/diagnosis",
+        json={"question": "流式错误如何传递？", "max_iterations": 4},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["tool_calls"][0]["name"] == "semantic_search"
+    assert response.json()["iterations"] == 2

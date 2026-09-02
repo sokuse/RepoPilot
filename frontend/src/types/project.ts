@@ -132,3 +132,25 @@ export type RagStreamEvent =
   | { type: 'step'; step: RagExecutionStep }
   | { type: 'complete'; response: RagAnswerResponse }
   | { type: 'error'; message: string }
+
+export interface ToolCallTrace {
+  call_id: string
+  name: string
+  arguments: Record<string, unknown>
+  summary: string
+  result: string
+  success: boolean
+  duration_ms: number
+}
+
+export interface DiagnosisResponse {
+  project_id: string
+  question: string
+  answer: string
+  model: string
+  iterations: number
+  duration_ms: number
+  usage: RagTokenUsage
+  tool_calls: ToolCallTrace[]
+  warnings: string[]
+}

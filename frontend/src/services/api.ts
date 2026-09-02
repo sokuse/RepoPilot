@@ -1,5 +1,6 @@
 import type {
   ChunkingStats,
+  DiagnosisResponse,
   Project,
   ProjectCreate,
   RagAnswerResponse,
@@ -125,4 +126,9 @@ export const projectApi = {
     })
     if (streamError) throw new ApiError(502, streamError)
   },
+  diagnose: (projectId: string, question: string, maxIterations = 3) =>
+    request<DiagnosisResponse>(`/projects/${projectId}/diagnosis`, {
+      method: 'POST',
+      body: JSON.stringify({ question, max_iterations: maxIterations }),
+    }),
 }
