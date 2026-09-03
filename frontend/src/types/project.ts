@@ -154,3 +154,26 @@ export interface DiagnosisResponse {
   tool_calls: ToolCallTrace[]
   warnings: string[]
 }
+
+export interface RequestedDiagnosisToolCall {
+  call_id: string
+  name: string
+  arguments: Record<string, unknown>
+}
+
+export type DiagnosisStreamEvent =
+  | { type: 'start'; question: string; max_iterations: number }
+  | {
+      type: 'decision'
+      iteration: number
+      tool_calls: RequestedDiagnosisToolCall[]
+    }
+  | {
+      type: 'tool_start'
+      call_id: string
+      name: string
+      arguments: Record<string, unknown>
+    }
+  | { type: 'tool_complete'; trace: ToolCallTrace }
+  | { type: 'complete'; response: DiagnosisResponse }
+  | { type: 'error'; message: string }

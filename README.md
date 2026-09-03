@@ -40,7 +40,8 @@ frontend/  Vue 3、TypeScript、Vite
 - 提供语义搜索、读取仓库文件、列出文件和仓库统计四个只读 Agent 工具
 - 由 Qwen 自主选择工具，LangGraph 循环执行“模型决策 → 工具调用 → 继续分析”
 - 通过 `POST /api/v1/projects/{project_id}/diagnosis` 运行有轮数上限的智能诊断
-- 在智能诊断页面展示最终结论、累计 Token 以及每次 Function Call 的参数和结果
+- 通过 `POST /api/v1/projects/{project_id}/diagnosis/stream` 实时推送决策和工具执行事件
+- 在智能诊断页面展示调查时间线、结构化结论、累计 Token 和 Function Call 轨迹
 
 ## 本地启动
 

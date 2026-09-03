@@ -1,11 +1,15 @@
+import json
+import logging
+from collections.abc import Iterator
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, status
+from fastapi.responses import StreamingResponse
 from openai import APIError
 
 from repopilot.db.session import SessionDep
 from repopilot.schemas.diagnosis import DiagnosisRequest, DiagnosisResponse
-from repopilot.services.diagnosis_service import diagnosis_service
+from repopilot.services.diagnosis_service import EmptyDiagnosisAnswerError, diagnosis_service
 from repopilot.services.project_service import project_service
 from repopilot.services.rag_service import ChatConfigurationError
 from repopilot.services.vector_search_service import (
@@ -14,14 +18,19 @@ from repopilot.services.vector_search_service import (
 )
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
-@router.post("", response_model=DiagnosisResponse)
-def diagnose_repository(
-    project_id: UUID,
-    payload: DiagnosisRequest,
-    session: SessionDep,
-) -> DiagnosisResponse:
+def _stream_event(event: dict[str, object]) -> str:
+    data = json.dumps(event, ensure_ascii=False, separators=(",", ":"))
+    return f"data: {data}\n\n"
+
+
+def _stream_error(message: str) -> str:
+    return _stream_event({"type": "error", "message": message})
+
+
+def _get_ready_project(project_id: UUID, session: SessionDep):
     project = project_service.get(session, str(project_id))
     if project is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
@@ -30,6 +39,16 @@ def diagnose_repository(
             status_code=status.HTTP_409_CONFLICT,
             detail="Repository must be ingested before diagnosis",
         )
+    return project
+
+
+@router.post("", response_model=DiagnosisResponse)
+def diagnose_repository(
+    project_id: UUID,
+    payload: DiagnosisRequest,
+    session: SessionDep,
+) -> DiagnosisResponse:
+    project = _get_ready_project(project_id, session)
     try:
         return diagnosis_service.diagnose(
             session,
@@ -52,3 +71,49 @@ def diagnose_repository(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="Qwen tool-calling request failed",
         ) from error
+    except EmptyDiagnosisAnswerError as error:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Qwen did not return a diagnosis after retrying",
+        ) from error
+
+
+@router.post("/stream", response_class=StreamingResponse)
+def stream_repository_diagnosis(
+    project_id: UUID,
+    payload: DiagnosisRequest,
+    session: SessionDep,
+) -> StreamingResponse:
+    project = _get_ready_project(project_id, session)
+
+    def events() -> Iterator[str]:
+        try:
+            for event in diagnosis_service.stream(
+                session,
+                project.id,
+                payload.question,
+                payload.max_iterations,
+            ):
+                yield _stream_event(event)
+        except (EmbeddingConfigurationError, ChatConfigurationError):
+            yield _stream_error("Qwen API Key 尚未配置。")
+        except VectorIndexNotReadyError:
+            yield _stream_error("请先构建向量索引。")
+        except APIError:
+            logger.exception("Qwen diagnosis streaming request failed")
+            yield _stream_error("Qwen 智能诊断失败，请检查模型配置或稍后重试。")
+        except EmptyDiagnosisAnswerError:
+            logger.exception("Qwen returned an empty diagnosis after retrying")
+            yield _stream_error("Qwen 未返回诊断结论，系统自动重试后仍然为空。")
+        except Exception:
+            logger.exception("Unexpected diagnosis streaming error")
+            yield _stream_error("智能诊断发生异常，请查看后端日志。")
+
+    return StreamingResponse(
+        events(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )

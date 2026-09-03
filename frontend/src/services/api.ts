@@ -1,6 +1,7 @@
 import type {
   ChunkingStats,
   DiagnosisResponse,
+  DiagnosisStreamEvent,
   Project,
   ProjectCreate,
   RagAnswerResponse,
@@ -38,9 +39,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>
 }
 
-async function readEventStream(
+async function readEventStream<TEvent>(
   response: Response,
-  onEvent: (event: RagStreamEvent) => void,
+  onEvent: (event: TEvent) => void,
 ): Promise<void> {
   if (!response.body) throw new ApiError(500, '浏览器没有提供可读取的响应流。')
 
@@ -62,7 +63,7 @@ async function readEventStream(
         .filter((line) => line.startsWith('data:'))
         .map((line) => line.slice(5).trimStart())
         .join('\n')
-      if (data) onEvent(JSON.parse(data) as RagStreamEvent)
+      if (data) onEvent(JSON.parse(data) as TEvent)
       boundary = buffer.indexOf('\n\n')
     }
 
@@ -120,15 +121,48 @@ export const projectApi = {
     }
 
     let streamError = ''
-    await readEventStream(response, (event) => {
+    let completed = false
+    await readEventStream<RagStreamEvent>(response, (event) => {
       if (event.type === 'error') streamError = event.message
-      else onEvent(event)
+      else {
+        if (event.type === 'complete') completed = true
+        onEvent(event)
+      }
     })
     if (streamError) throw new ApiError(502, streamError)
+    if (!completed) throw new ApiError(502, 'RAG 响应在完成前意外中断。')
   },
   diagnose: (projectId: string, question: string, maxIterations = 3) =>
     request<DiagnosisResponse>(`/projects/${projectId}/diagnosis`, {
       method: 'POST',
       body: JSON.stringify({ question, max_iterations: maxIterations }),
     }),
+  diagnoseStream: async (
+    projectId: string,
+    question: string,
+    onEvent: (event: DiagnosisStreamEvent) => void,
+    maxIterations = 3,
+  ) => {
+    const response = await fetch(`${API_PREFIX}/projects/${projectId}/diagnosis/stream`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question, max_iterations: maxIterations }),
+    })
+    if (!response.ok) {
+      const body = (await response.json().catch(() => null)) as { detail?: string } | null
+      throw new ApiError(response.status, body?.detail ?? `请求失败：${response.status}`)
+    }
+
+    let streamError = ''
+    let completed = false
+    await readEventStream<DiagnosisStreamEvent>(response, (event) => {
+      if (event.type === 'error') streamError = event.message
+      else {
+        if (event.type === 'complete') completed = true
+        onEvent(event)
+      }
+    })
+    if (streamError) throw new ApiError(502, streamError)
+    if (!completed) throw new ApiError(502, '诊断响应在完成前意外中断。')
+  },
 }
