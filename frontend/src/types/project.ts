@@ -155,32 +155,25 @@ export interface DiagnosisResponse {
   warnings: string[]
 }
 
-export interface AgentExecutionStep {
+export interface RequestedDiagnosisToolCall {
+  call_id: string
   name: string
-  label: string
-  output: string
-  duration_ms: number
-  usage: RagTokenUsage
+  arguments: Record<string, unknown>
 }
 
-export interface DiagnosisReview {
-  passed: boolean
-  score: number
-  issues: string[]
-  final_answer: string
-}
-
-export interface MultiAgentDiagnosisResponse {
-  project_id: string
-  question: string
-  model: string
-  plan: string
-  draft_answer: string
-  review: DiagnosisReview
-  final_answer: string
-  tool_calls: ToolCallTrace[]
-  agents: AgentExecutionStep[]
-  usage: RagTokenUsage
-  duration_ms: number
-  warnings: string[]
-}
+export type DiagnosisStreamEvent =
+  | { type: 'start'; question: string; max_iterations: number }
+  | {
+      type: 'decision'
+      iteration: number
+      tool_calls: RequestedDiagnosisToolCall[]
+    }
+  | {
+      type: 'tool_start'
+      call_id: string
+      name: string
+      arguments: Record<string, unknown>
+    }
+  | { type: 'tool_complete'; trace: ToolCallTrace }
+  | { type: 'complete'; response: DiagnosisResponse }
+  | { type: 'error'; message: string }
