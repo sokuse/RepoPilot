@@ -95,6 +95,48 @@ def test_final_answer_omits_tools_and_retries_empty_content() -> None:
     assert decision.usage.total_tokens == 50
 
 
+def test_tool_round_disables_thinking_when_tool_call_is_required() -> None:
+    requests = []
+    response = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(
+                    content=None,
+                    tool_calls=[
+                        SimpleNamespace(
+                            id="call-1",
+                            function=SimpleNamespace(
+                                name="semantic_search",
+                                arguments='{"query":"路由注册"}',
+                            ),
+                        )
+                    ],
+                )
+            )
+        ],
+        usage=SimpleNamespace(prompt_tokens=10, completion_tokens=5, total_tokens=15),
+    )
+
+    def create(**request):
+        requests.append(request)
+        return response
+
+    provider = object.__new__(QwenToolCallingProvider)
+    provider.client = SimpleNamespace(
+        chat=SimpleNamespace(completions=SimpleNamespace(create=create))
+    )
+
+    decision = provider.decide(
+        [{"role": "user", "content": "FastAPI 路由在哪里注册？"}],
+        allow_tools=True,
+        force_tool=True,
+    )
+
+    assert requests[0]["tool_choice"] == "required"
+    assert requests[0]["extra_body"] == {"enable_thinking": False}
+    assert decision.tool_calls[0].name == "semantic_search"
+
+
 def test_diagnosis_graph_calls_tool_then_generates_answer(monkeypatch) -> None:
     provider = FakeToolCallingProvider()
     monkeypatch.setattr(

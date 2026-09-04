@@ -1,4 +1,5 @@
 import json
+import logging
 import re
 from dataclasses import dataclass
 from functools import lru_cache
@@ -6,7 +7,7 @@ from time import perf_counter
 from typing import Protocol, TypedDict
 
 from langgraph.graph import END, START, StateGraph
-from openai import OpenAI
+from openai import APIError, OpenAI
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
@@ -23,6 +24,11 @@ from repopilot.services.rag_service import ChatConfigurationError
 
 MAX_REVIEW_TOOL_RESULT_CHARS = 4_000
 JSON_FENCE = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE)
+logger = logging.getLogger(__name__)
+
+DEFAULT_INVESTIGATION_PLAN = """1. 使用语义检索定位与问题相关的实现和调用入口。
+2. 读取关键文件并核对真实控制流、异常处理和数据流。
+3. 基于文件路径与行号整理证据，给出结论、修复建议和验证步骤。"""
 
 
 @dataclass(frozen=True)
@@ -108,23 +114,33 @@ def _add_usage(left: RagTokenUsage, right: RagTokenUsage) -> RagTokenUsage:
 
 def planner_node(state: MultiAgentState) -> dict[str, object]:
     started = perf_counter()
-    result = get_text_agent_provider().generate(
-        PLANNER_PROMPT,
-        f"需要调查的问题：\n{state['question']}",
-        json_mode=False,
-    )
-    plan = result.content or "1. 使用语义检索定位相关实现。\n2. 阅读关键文件并核对调用链。"
+    warnings = list(state.get("warnings", []))
+    try:
+        result = get_text_agent_provider().generate(
+            PLANNER_PROMPT,
+            f"需要调查的问题：\n{state['question']}",
+            json_mode=False,
+        )
+        plan = result.content or DEFAULT_INVESTIGATION_PLAN
+        usage = result.usage
+    except APIError:
+        # 规划属于增强步骤；上游偶发失败时仍可用固定计划进入核心调查流程。
+        logger.exception("Planner Agent request failed; using the default investigation plan")
+        plan = DEFAULT_INVESTIGATION_PLAN
+        usage = RagTokenUsage()
+        warnings.append("规划 Agent 调用失败，已使用系统默认调查计划继续执行。")
     step = AgentExecutionStep(
         name="planner",
         label="规划 Agent",
         output=plan,
         duration_ms=int((perf_counter() - started) * 1000),
-        usage=result.usage,
+        usage=usage,
     )
     return {
         "plan": plan,
         "agents": [step],
-        "usage": _add_usage(state.get("usage", RagTokenUsage()), result.usage),
+        "usage": _add_usage(state.get("usage", RagTokenUsage()), usage),
+        "warnings": warnings,
     }
 
 
@@ -191,8 +207,22 @@ def reviewer_node(state: MultiAgentState) -> dict[str, object]:
         f"调查草稿：\n{state['draft_answer']}\n\n工具证据（JSON）：\n"
         f"{_review_evidence(state.get('tool_calls', []))}"
     )
-    result = get_text_agent_provider().generate(REVIEWER_PROMPT, prompt, json_mode=True)
-    review, warning = _parse_review(result.content, state["draft_answer"])
+    warnings = list(state.get("warnings", []))
+    try:
+        result = get_text_agent_provider().generate(REVIEWER_PROMPT, prompt, json_mode=True)
+        review, warning = _parse_review(result.content, state["draft_answer"])
+        usage = result.usage
+    except APIError:
+        # 调查草稿已经有工具证据，审查服务异常时降级返回草稿，避免整次诊断丢失。
+        logger.exception("Reviewer Agent request failed; returning the investigator draft")
+        review = DiagnosisReview(
+            passed=False,
+            score=0,
+            issues=["审查 Agent 调用失败，本次结论尚未完成二次证据审查。"],
+            final_answer=state["draft_answer"],
+        )
+        warning = "审查 Agent 暂时不可用，最终答案使用调查 Agent 的原始草稿。"
+        usage = RagTokenUsage()
     output = f"评分：{review.score}/100；通过：{'是' if review.passed else '否'}"
     if review.issues:
         output += "\n问题：" + "；".join(review.issues)
@@ -201,15 +231,14 @@ def reviewer_node(state: MultiAgentState) -> dict[str, object]:
         label="审查 Agent",
         output=output,
         duration_ms=int((perf_counter() - started) * 1000),
-        usage=result.usage,
+        usage=usage,
     )
-    warnings = list(state.get("warnings", []))
     if warning:
         warnings.append(warning)
     return {
         "review": review,
         "agents": [*state.get("agents", []), step],
-        "usage": _add_usage(state.get("usage", RagTokenUsage()), result.usage),
+        "usage": _add_usage(state.get("usage", RagTokenUsage()), usage),
         "warnings": warnings,
     }
 

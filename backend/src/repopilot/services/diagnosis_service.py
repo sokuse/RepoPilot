@@ -85,6 +85,10 @@ class QwenToolCallingProvider:
         if allow_tools:
             request["tools"] = REPOSITORY_TOOL_DEFINITIONS
             request["tool_choice"] = "required" if force_tool else "auto"
+            # Qwen3.7 等混合思考模型默认可能开启思考模式，但百炼规定：
+            # 思考模式不能与 tool_choice="required" 同时使用。调查 Agent 的
+            # 第一轮必须调用仓库工具，因此这里关闭工具轮的思考模式。
+            request["extra_body"] = {"enable_thinking": False}
 
         # 最终结论轮完全不发送 tools。少数兼容接口仍可能偶发返回空 content，
         # 因此只在最终轮自动重试一次，并累计两次请求的 Token。
