@@ -1,6 +1,15 @@
 from fastapi import APIRouter
 
-from repopilot.api.routes import chunks, conversations, diagnosis, health, projects, rag, retrieval
+from repopilot.api.routes import (
+    chunks,
+    conversations,
+    diagnosis,
+    evaluations,
+    health,
+    projects,
+    rag,
+    retrieval,
+)
 
 api_router = APIRouter()
 api_router.include_router(health.router, tags=["system"])
@@ -29,4 +38,9 @@ api_router.include_router(
     diagnosis.router,
     prefix="/projects/{project_id}/diagnosis",
     tags=["diagnosis"],
+)
+api_router.include_router(
+    evaluations.router,
+    prefix="/projects/{project_id}/evaluations",
+    tags=["evaluations"],
 )

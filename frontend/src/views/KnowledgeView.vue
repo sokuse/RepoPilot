@@ -2,6 +2,7 @@
 import { onMounted, ref, watch } from 'vue'
 
 import { ApiError, projectApi } from '../services/api'
+import { useDeveloperMode } from '../composables/useDeveloperMode'
 import type {
   ConversationDetail,
   ConversationSummary,
@@ -11,6 +12,8 @@ import type {
   SemanticSearchResult,
   VectorIndexStats,
 } from '../types/project'
+
+const { developerMode } = useDeveloperMode()
 
 const projects = ref<Project[]>([])
 const selectedProjectId = ref('')
@@ -106,6 +109,20 @@ async function rebuildIndex() {
       error instanceof ApiError && error.status === 409
         ? '请先回到项目工作台生成知识切片。'
         : '向量索引构建失败，请查看后端日志。'
+  } finally {
+    indexing.value = false
+  }
+}
+
+async function prepareKnowledge() {
+  if (!selectedProjectId.value) return
+  indexing.value = true
+  errorMessage.value = ''
+  try {
+    await projectApi.rebuildChunks(selectedProjectId.value)
+    indexStats.value = await projectApi.rebuildIndex(selectedProjectId.value)
+  } catch (error) {
+    errorMessage.value = error instanceof ApiError ? error.message : '知识库准备失败，请稍后重试。'
   } finally {
     indexing.value = false
   }
@@ -207,9 +224,9 @@ onMounted(() => void loadProjects())
       <div>
         <p class="eyebrow">SEMANTIC RETRIEVAL</p>
         <h1>知识检索</h1>
-        <p>从 Qdrant 检索相关代码，再由 LangGraph 编排 Qwen 生成带真实引用的中文答案。</p>
+        <p>{{ developerMode ? '从 Qdrant 检索相关代码，再由 LangGraph 编排 Qwen 生成带真实引用的中文答案。' : '询问项目结构、实现逻辑和维护问题，回答会附带可核对的代码来源。' }}</p>
       </div>
-      <div class="phase-pill">第八阶段 · 对话 RAG</div>
+      <div class="phase-pill">{{ developerMode ? '第八阶段 · 对话 RAG' : '项目知识助手' }}</div>
     </header>
 
     <article class="panel retrieval-control">
@@ -227,20 +244,23 @@ onMounted(() => void loadProjects())
           <span :class="['index-dot', { ready: indexStats?.ready }]" />
           <div>
             <strong>{{ indexStats?.ready ? '向量索引已就绪' : '尚未构建向量索引' }}</strong>
-            <small v-if="indexStats?.ready">
+            <small v-if="indexStats?.ready && developerMode">
               {{ indexStats.indexed_chunks }} 个向量 · {{ indexStats.vector_size }} 维 ·
               {{ indexStats.embedding_model }}
             </small>
-            <small v-else>使用百炼 text-embedding-v4 API，向量保存在本地 Qdrant。</small>
+            <small v-else-if="!indexStats?.ready && developerMode">使用百炼 text-embedding-v4 API，向量保存在本地 Qdrant。</small>
+            <small v-else-if="indexStats?.ready">可以开始询问当前项目。</small>
+            <small v-else>首次使用前需要准备项目知识库。</small>
           </div>
         </div>
         <button
+          v-if="developerMode || !indexStats?.ready"
           class="primary-button index-button"
           type="button"
           :disabled="!selectedProjectId || indexing"
-          @click="rebuildIndex"
+          @click="developerMode ? rebuildIndex() : prepareKnowledge()"
         >
-          {{ indexing ? '正在生成向量…' : indexStats?.ready ? '重建索引' : '构建索引' }}
+          {{ indexing ? '正在准备…' : developerMode ? (indexStats?.ready ? '重建索引' : '构建索引') : (indexStats?.ready ? '重新准备' : '准备知识库') }}
         </button>
       </div>
 
@@ -253,6 +273,7 @@ onMounted(() => void loadProjects())
         />
         <div class="search-actions">
           <button
+            v-if="developerMode"
             class="secondary-button"
             type="button"
             :disabled="!indexStats?.ready || searching || answering"
@@ -280,8 +301,8 @@ onMounted(() => void loadProjects())
         </button>
       </div>
       <p class="memory-summary">
-        短期记忆读取当前对话最近 6 条消息；长期记忆已索引
-        {{ memoryStats?.indexed_memories ?? 0 }} 个切片。
+        <template v-if="developerMode">短期记忆读取当前对话最近 6 条消息；长期记忆已索引 {{ memoryStats?.indexed_memories ?? 0 }} 个切片。</template>
+        <template v-else>系统会结合当前对话和过去的项目经验回答，你可以在这里继续追问。</template>
       </p>
       <label class="conversation-selector">
         当前对话
@@ -317,13 +338,14 @@ onMounted(() => void loadProjects())
           <p class="eyebrow">RAG ANSWER</p>
           <h2>仓库回答</h2>
         </div>
-        <span>
+        <span v-if="developerMode">
           {{ ragAnswer.usage.total_tokens }} tokens · {{ formatDuration(ragAnswer.duration_ms) }} ·
           {{ ragAnswer.citations.length }} 个有效引用
         </span>
+        <span v-else>已核对 {{ ragAnswer.citations.length }} 个代码来源</span>
       </div>
 
-      <div class="workflow-steps">
+      <div v-if="developerMode" class="workflow-steps">
         <div v-for="(step, index) in ragAnswer.steps" :key="step.name" class="workflow-step">
           <span>{{ index + 1 }}</span>
           <div><strong>{{ step.label }}</strong><small>{{ step.detail }}</small></div>
@@ -348,7 +370,7 @@ onMounted(() => void loadProjects())
           </div>
         </div>
       </div>
-      <div v-if="ragAnswer.retrieved_memories.length" class="memory-source-list">
+      <div v-if="developerMode && ragAnswer.retrieved_memories.length" class="memory-source-list">
         <strong>召回的历史记忆</strong>
         <article v-for="memory in ragAnswer.retrieved_memories" :key="memory.memory_id">
           <span>{{ memory.source_type === 'diagnosis' ? '历史诊断' : '历史对话' }}</span>
@@ -358,7 +380,7 @@ onMounted(() => void loadProjects())
       </div>
     </article>
 
-    <div v-if="results.length" class="search-results">
+    <div v-if="developerMode && results.length" class="search-results">
       <div class="results-heading">
         <p class="eyebrow">RETRIEVAL EVIDENCE</p>
         <span>{{ results.length }} 条结果</span>
@@ -377,7 +399,7 @@ onMounted(() => void loadProjects())
         <pre><code>{{ result.content }}</code></pre>
       </article>
     </div>
-    <div v-else-if="!loading" class="retrieval-empty">
+    <div v-else-if="developerMode && !loading" class="retrieval-empty">
       构建索引后输入一个与代码或文档相关的问题，检索结果会保留文件路径和行号。
     </div>
   </section>

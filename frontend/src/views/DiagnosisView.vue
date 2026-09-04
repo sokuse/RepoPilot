@@ -2,12 +2,15 @@
 import { computed, onMounted, ref } from 'vue'
 
 import { ApiError, projectApi } from '../services/api'
+import { useDeveloperMode } from '../composables/useDeveloperMode'
 import type {
   DiagnosisResponse,
   DiagnosisStreamEvent,
   MultiAgentDiagnosisResponse,
   Project,
 } from '../types/project'
+
+const { developerMode } = useDeveloperMode()
 
 type ActivityStatus = 'running' | 'success' | 'failed'
 
@@ -168,14 +171,14 @@ onMounted(() => void loadProjects())
       <div>
         <p class="eyebrow">MULTI-AGENT DIAGNOSIS</p>
         <h1>智能诊断</h1>
-        <p>多 Agent 负责规划、调查和证据审查，也可切换为低成本的单 Agent 实时诊断。</p>
+        <p>{{ developerMode ? '多 Agent 负责规划、调查和证据审查，也可切换为低成本的单 Agent 实时诊断。' : '描述故障现象和相关线索，系统会调查项目代码并给出带证据的修复建议。' }}</p>
       </div>
-      <div class="phase-pill">第七阶段 · Multi-Agent</div>
+      <div class="phase-pill">{{ developerMode ? '第七阶段 · Multi-Agent' : '项目故障助手' }}</div>
     </header>
 
     <aside class="diagnosis-guide">
-      <div><strong>多 Agent 审查</strong><span>规划、调查、审查分工协作，证据更严格，但耗时和 Token 更高。</span></div>
-      <div><strong>单 Agent 实时</strong><span>实时展示工具执行过程，速度和成本更适合日常快速诊断。</span></div>
+      <div><strong>{{ developerMode ? '多 Agent 审查' : '深度诊断' }}</strong><span>{{ developerMode ? '规划、调查、审查分工协作，证据更严格，但耗时和 Token 更高。' : '适合复杂、跨文件的问题，系统会进行额外的证据复核。' }}</span></div>
+      <div><strong>{{ developerMode ? '单 Agent 实时' : '快速诊断' }}</strong><span>{{ developerMode ? '实时展示工具执行过程，速度和成本更适合日常快速诊断。' : '适合日常问题，能够更快返回代码调查结果。' }}</span></div>
     </aside>
 
     <article class="panel diagnosis-control">
@@ -184,8 +187,8 @@ onMounted(() => void loadProjects())
           <label>
             诊断模式
             <select v-model="diagnosisMode" :disabled="diagnosing">
-              <option value="multi">多 Agent · 规划 + 调查 + 审查</option>
-              <option value="single">单 Agent · 实时工具调用</option>
+              <option value="multi">{{ developerMode ? '多 Agent · 规划 + 调查 + 审查' : '深度诊断 · 额外证据复核' }}</option>
+              <option value="single">{{ developerMode ? '单 Agent · 实时工具调用' : '快速诊断 · 日常问题' }}</option>
             </select>
           </label>
           <label>
@@ -244,12 +247,12 @@ onMounted(() => void loadProjects())
 
     <section v-if="diagnosing && diagnosisMode === 'multi' && !activities.length" class="panel diagnosis-progress">
       <div class="diagnosis-progress-heading">
-        <div><span class="agent-pulse" /><strong>多 Agent 协作进行中</strong></div>
-        <small>规划 → 工具调查 → 证据审查</small>
+        <div><span class="agent-pulse" /><strong>{{ developerMode ? '多 Agent 协作进行中' : '正在进行深度分析' }}</strong></div>
+        <small>{{ developerMode ? '规划 → 工具调查 → 证据审查' : '调查代码并核对证据，请稍候' }}</small>
       </div>
     </section>
 
-    <section v-if="activities.length" class="panel diagnosis-progress">
+    <section v-if="developerMode && activities.length" class="panel diagnosis-progress">
       <div class="diagnosis-progress-heading">
         <div><span v-if="diagnosing" class="agent-pulse" /><strong>Agent 执行过程</strong></div>
         <small>{{ diagnosing ? '实时执行中' : diagnosisMode === 'multi' ? '审查已完成' : '调查已完成' }}</small>
@@ -263,7 +266,7 @@ onMounted(() => void loadProjects())
     </section>
 
     <template v-if="multiAgentResult">
-      <section class="agent-workflow-section">
+      <section v-if="developerMode" class="agent-workflow-section">
         <div class="results-heading">
           <p class="eyebrow">AGENT WORKFLOW</p>
           <span>
@@ -292,20 +295,21 @@ onMounted(() => void loadProjects())
       <article class="answer-panel diagnosis-answer">
         <div class="answer-heading">
           <div><p class="eyebrow">REVIEWED DIAGNOSIS</p><h2>审查后的诊断结论</h2></div>
-          <span>
+          <span v-if="developerMode">
             审查 {{ multiAgentResult.review.score }} 分 · {{ multiAgentResult.model }} ·
             {{ multiAgentResult.duration_ms }} ms
           </span>
+          <span v-else>已完成代码调查与证据复核</span>
         </div>
         <div class="answer-content">{{ multiAgentResult.final_answer }}</div>
-        <div :class="['review-summary', { passed: multiAgentResult.review.passed }]">
+        <div v-if="developerMode" :class="['review-summary', { passed: multiAgentResult.review.passed }]">
           <strong>{{ multiAgentResult.review.passed ? '审查通过' : '审查后已修订' }}</strong>
           <span>证据质量评分 {{ multiAgentResult.review.score }}/100</span>
         </div>
-        <ul v-if="multiAgentResult.review.issues.length" class="review-issues">
+        <ul v-if="developerMode && multiAgentResult.review.issues.length" class="review-issues">
           <li v-for="issue in multiAgentResult.review.issues" :key="issue">{{ issue }}</li>
         </ul>
-        <details class="draft-answer">
+        <details v-if="developerMode" class="draft-answer">
           <summary>查看审查前的调查草稿</summary>
           <div>{{ multiAgentResult.draft_answer }}</div>
         </details>
@@ -319,10 +323,11 @@ onMounted(() => void loadProjects())
       <article class="answer-panel diagnosis-answer">
         <div class="answer-heading">
           <div><p class="eyebrow">DIAGNOSIS</p><h2>诊断结论</h2></div>
-          <span>
+          <span v-if="developerMode">
             {{ result.model }} · {{ result.iterations }} 轮 · {{ result.usage.total_tokens }} tokens ·
             {{ result.duration_ms }} ms
           </span>
+          <span v-else>已完成项目代码调查</span>
         </div>
         <div class="answer-content">{{ result.answer }}</div>
         <p v-for="warning in result.warnings" :key="warning" class="answer-warning">
@@ -331,7 +336,7 @@ onMounted(() => void loadProjects())
       </article>
     </template>
 
-    <section v-if="activeToolCalls.length" class="tool-trace-section">
+    <section v-if="developerMode && activeToolCalls.length" class="tool-trace-section">
       <div class="results-heading">
         <p class="eyebrow">TOOL TRACE</p>
         <span>{{ activeToolCalls.length }} 次工具调用</span>

@@ -2,8 +2,8 @@
 
 RepoPilot 是一个面向多仓库研发团队的软件维护知识、故障诊断与 Agent 评测平台。
 
-当前仓库已完成第八阶段：在仓库采集、可追溯 RAG、Function Call 和多 Agent 诊断之上，
-新增短期对话上下文、长期向量记忆、历史诊断召回与回答反馈闭环。
+当前仓库已完成第九阶段：在仓库采集、可追溯 RAG、Function Call、多 Agent 诊断和
+长期记忆之上，新增可复现的测试问题集、四种方案对比和评测结果持久化。
 
 ## 目录
 
@@ -36,7 +36,6 @@ frontend/  Vue 3、TypeScript、Vite
 - 将每次问答的状态、模型、耗时和 Token 用量持久化到 SQLite
 - 保存回答当时的检索切片、引用和 LangGraph 步骤快照，避免重建索引后旧依据丢失
 - 通过 `GET /api/v1/projects/{project_id}/rag/runs` 查询运行历史，并可读取单次运行详情
-- 在知识检索页面回看已完成或失败的 RAG 运行记录
 - 提供语义搜索、读取仓库文件、列出文件和仓库统计四个只读 Agent 工具
 - 由 Qwen 自主选择工具，LangGraph 循环执行“模型决策 → 工具调用 → 继续分析”
 - 通过 `POST /api/v1/projects/{project_id}/diagnosis` 运行有轮数上限的智能诊断
@@ -51,6 +50,13 @@ frontend/  Vue 3、TypeScript、Vite
 - 将问答和诊断结论切片、Embedding 后写入独立的 `repopilot_memories` Qdrant collection
 - 新问题同时检索仓库代码、当前对话最近消息、历史对话和过去诊断记录
 - 返回并展示 `[M编号]` 历史记忆来源、相似度和长期记忆索引数量
+- 创建包含问题、期望文件和必要关键词的项目级评测数据集
+- 对比纯检索、RAG、单 Agent 和多 Agent 四种运行模式
+- 自动计算文件召回、关键词覆盖、证据可信度、综合得分和通过率
+- 保存每道题的答案、召回文件、Token、耗时、错误以及模型与切片策略快照
+- 在评测实验页面查看单题明细和历史实验，支持使用同一测试集进行横向比较
+- 前端区分普通用户工作区与开发者实验室，可一键隐藏切片、模型、Token 和评测细节
+- 正式部署时可通过 `VITE_ENABLE_DEVELOPER_LAB=false` 关闭实验室入口和路由访问
 
 ## 本地启动
 
@@ -76,6 +82,13 @@ REPOPILOT_QWEN_API_KEY=你的百炼APIKey
 cd frontend
 npm install
 npm run dev
+```
+
+本地学习默认保留开发者实验室。面向普通用户构建时，可以在 `frontend/.env.production`
+中关闭内部评测与技术细节入口：
+
+```env
+VITE_ENABLE_DEVELOPER_LAB=false
 ```
 
 默认地址：

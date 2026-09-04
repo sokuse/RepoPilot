@@ -2,7 +2,10 @@
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 
 import { ApiError, projectApi } from '../services/api'
-import type { ChunkingStats, Project, ProjectCreate, RepositoryStats } from '../types/project'
+import { useDeveloperMode } from '../composables/useDeveloperMode'
+import type { ChunkingStats, Project, ProjectCreate, RepositoryStats, VectorIndexStats } from '../types/project'
+
+const { developerMode } = useDeveloperMode()
 
 const projects = ref<Project[]>([])
 const loading = ref(true)
@@ -10,13 +13,16 @@ const submitting = ref(false)
 const deletingProjectId = ref<string | null>(null)
 const ingestingProjectId = ref<string | null>(null)
 const chunkingProjectId = ref<string | null>(null)
+const preparingProjectId = ref<string | null>(null)
 const errorMessage = ref('')
 const projectStats = ref<Record<string, RepositoryStats>>({})
 const chunkStats = ref<Record<string, ChunkingStats>>({})
+const indexStats = ref<Record<string, VectorIndexStats>>({})
 const form = reactive<ProjectCreate>({ name: '', repository_url: '', default_branch: 'main' })
 const totalChunks = computed(() =>
   Object.values(chunkStats.value).reduce((total, stats) => total + stats.total_chunks, 0),
 )
+const readyProjects = computed(() => projects.value.filter((project) => project.status === 'ready').length)
 
 const statusText: Record<Project['status'], string> = {
   pending: '等待接入',
@@ -43,11 +49,12 @@ async function loadReadyProjectStats() {
   const entries = await Promise.all(
     readyProjects.map(async (project) => {
       try {
-        const [repositoryStats, knowledgeStats] = await Promise.all([
+        const [repositoryStats, knowledgeStats, vectorStats] = await Promise.all([
           projectApi.stats(project.id),
           projectApi.chunkStats(project.id),
+          projectApi.indexStats(project.id),
         ])
-        return [project.id, repositoryStats, knowledgeStats] as const
+        return [project.id, repositoryStats, knowledgeStats, vectorStats] as const
       } catch {
         return null
       }
@@ -59,6 +66,9 @@ async function loadReadyProjectStats() {
   )
   chunkStats.value = Object.fromEntries(
     successfulEntries.map(([projectId, , knowledgeStats]) => [projectId, knowledgeStats]),
+  )
+  indexStats.value = Object.fromEntries(
+    successfulEntries.map(([projectId, , , vectorStats]) => [projectId, vectorStats]),
   )
 }
 
@@ -126,6 +136,22 @@ async function rebuildChunks(project: Project) {
   }
 }
 
+async function prepareKnowledge(project: Project) {
+  preparingProjectId.value = project.id
+  errorMessage.value = ''
+  try {
+    const chunks = await projectApi.rebuildChunks(project.id)
+    const index = await projectApi.rebuildIndex(project.id)
+    chunkStats.value = { ...chunkStats.value, [project.id]: chunks }
+    indexStats.value = { ...indexStats.value, [project.id]: index }
+  } catch (error) {
+    errorMessage.value =
+      error instanceof ApiError ? error.message : '知识库准备失败，请稍后重试。'
+  } finally {
+    preparingProjectId.value = null
+  }
+}
+
 function formatBytes(bytes: number) {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
@@ -158,9 +184,9 @@ onUnmounted(() => window.clearInterval(pollingTimer))
       <div>
         <p class="eyebrow">KNOWLEDGE WORKSPACE</p>
         <h1>项目工作台</h1>
-        <p>接入代码仓库，为后续代码切片、知识索引和智能诊断准备数据。</p>
+        <p>{{ developerMode ? '接入代码仓库，为后续代码切片、知识索引和智能诊断准备数据。' : '集中接入和管理代码仓库，为知识问答与故障诊断提供项目资料。' }}</p>
       </div>
-      <div class="phase-pill">第二阶段 · RAG 切片</div>
+      <div class="phase-pill">{{ developerMode ? '第二阶段 · RAG 切片' : '仓库维护中心' }}</div>
     </header>
 
     <div class="metrics-grid">
@@ -168,7 +194,8 @@ onUnmounted(() => window.clearInterval(pollingTimer))
         <span>已接入项目</span><strong>{{ projects.length }}</strong><small>跨仓库知识将在此汇总</small>
       </article>
       <article class="metric-card">
-        <span>知识切片</span><strong>{{ totalChunks }}</strong><small>可追溯至源文件和行号</small>
+        <template v-if="developerMode"><span>知识切片</span><strong>{{ totalChunks }}</strong><small>可追溯至源文件和行号</small></template>
+        <template v-else><span>可用项目</span><strong>{{ readyProjects }}</strong><small>可以进行问答和智能诊断</small></template>
       </article>
       <article class="metric-card accent-card">
         <span>系统状态</span><strong>{{ errorMessage ? '离线' : '可用' }}</strong><small>Vue → FastAPI</small>
@@ -218,7 +245,7 @@ onUnmounted(() => window.clearInterval(pollingTimer))
                 {{ formatBytes(projectStats[project.id].total_bytes) }} ·
                 {{ topLanguages(projectStats[project.id]) }}
               </small>
-              <small v-if="chunkStats[project.id]?.total_chunks" class="repo-stats">
+              <small v-if="developerMode && chunkStats[project.id]?.total_chunks" class="repo-stats">
                 {{ chunkStats[project.id].total_chunks }} 个知识切片
               </small>
             </div>
@@ -234,7 +261,7 @@ onUnmounted(() => window.clearInterval(pollingTimer))
                 {{ ingestingProjectId === project.id ? '启动中' : project.status === 'failed' ? '重试' : '开始采集' }}
               </button>
               <button
-                v-if="project.status === 'ready'"
+                v-if="developerMode && project.status === 'ready'"
                 class="chunk-button"
                 type="button"
                 :disabled="chunkingProjectId === project.id"
@@ -248,6 +275,16 @@ onUnmounted(() => window.clearInterval(pollingTimer))
                       : '生成切片'
                 }}
               </button>
+              <button
+                v-if="!developerMode && project.status === 'ready' && !indexStats[project.id]?.ready"
+                class="chunk-button"
+                type="button"
+                :disabled="preparingProjectId === project.id"
+                @click="prepareKnowledge(project)"
+              >
+                {{ preparingProjectId === project.id ? '准备中' : '准备知识库' }}
+              </button>
+              <span v-if="!developerMode && indexStats[project.id]?.ready" class="knowledge-ready">知识库可用</span>
               <button
                 class="delete-button"
                 type="button"

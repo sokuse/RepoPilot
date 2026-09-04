@@ -11,6 +11,7 @@ from repopilot.db.base import Base
 from repopilot.db.session import get_session
 from repopilot.main import app
 from repopilot.models.conversation import Conversation, ConversationMessage, MemoryChunk
+from repopilot.models.evaluation import EvaluationCase, EvaluationResult, EvaluationRun
 from repopilot.models.knowledge_chunk import KnowledgeChunk
 from repopilot.models.project import Project
 from repopilot.models.rag_run import RagRun
@@ -60,6 +61,9 @@ def clean_database(monkeypatch: pytest.MonkeyPatch) -> Generator[None, None, Non
         lambda *_args, **_kwargs: [],
     )
     with TestingSessionLocal() as session:
+        session.execute(delete(EvaluationResult))
+        session.execute(delete(EvaluationRun))
+        session.execute(delete(EvaluationCase))
         session.execute(delete(MemoryChunk))
         session.execute(delete(ConversationMessage))
         session.execute(delete(Conversation))
@@ -165,6 +169,36 @@ def test_create_read_feedback_and_delete_conversation() -> None:
 
     delete_response = client.delete(
         f"/api/v1/projects/{created['id']}/conversations/{conversation_id}"
+    )
+    assert delete_response.status_code == 204
+
+
+def test_create_list_and_delete_evaluation_case() -> None:
+    created = create_project()
+    with TestingSessionLocal() as session:
+        project = session.get(Project, created["id"])
+        assert project is not None
+        project.status = "ready"
+        session.commit()
+
+    create_response = client.post(
+        f"/api/v1/projects/{created['id']}/evaluations/cases",
+        json={
+            "name": "FastAPI 入口",
+            "question": "项目在哪里创建 FastAPI 应用？",
+            "expected_files": ["backend/src/repopilot/main.py"],
+            "required_keywords": ["FastAPI", "create_app"],
+        },
+    )
+    assert create_response.status_code == 201
+    case_id = create_response.json()["id"]
+
+    list_response = client.get(f"/api/v1/projects/{created['id']}/evaluations/cases")
+    assert list_response.status_code == 200
+    assert list_response.json()[0]["required_keywords"] == ["FastAPI", "create_app"]
+
+    delete_response = client.delete(
+        f"/api/v1/projects/{created['id']}/evaluations/cases/{case_id}"
     )
     assert delete_response.status_code == 204
 

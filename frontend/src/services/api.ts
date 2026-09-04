@@ -5,6 +5,11 @@ import type {
   ConversationSummary,
   DiagnosisResponse,
   DiagnosisStreamEvent,
+  EvaluationCase,
+  EvaluationCaseCreate,
+  EvaluationRunCreate,
+  EvaluationRunDetail,
+  EvaluationRunSummary,
   MultiAgentDiagnosisResponse,
   MemoryStats,
   Project,
@@ -201,4 +206,24 @@ export const projectApi = {
     if (streamError) throw new ApiError(502, streamError)
     if (!completed) throw new ApiError(502, '诊断响应在完成前意外中断。')
   },
+  listEvaluationCases: (projectId: string) =>
+    request<EvaluationCase[]>(`/projects/${projectId}/evaluations/cases`),
+  createEvaluationCase: (projectId: string, payload: EvaluationCaseCreate) =>
+    request<EvaluationCase>(`/projects/${projectId}/evaluations/cases`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  deleteEvaluationCase: (projectId: string, caseId: string) =>
+    request<void>(`/projects/${projectId}/evaluations/cases/${caseId}`, {
+      method: 'DELETE',
+    }),
+  runEvaluation: (projectId: string, payload: EvaluationRunCreate) =>
+    request<EvaluationRunDetail>(`/projects/${projectId}/evaluations/runs`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  listEvaluationRuns: (projectId: string) =>
+    request<EvaluationRunSummary[]>(`/projects/${projectId}/evaluations/runs`),
+  getEvaluationRun: (projectId: string, runId: string) =>
+    request<EvaluationRunDetail>(`/projects/${projectId}/evaluations/runs/${runId}`),
 }

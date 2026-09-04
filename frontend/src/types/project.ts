@@ -248,3 +248,77 @@ export type DiagnosisStreamEvent =
   | { type: 'tool_complete'; trace: ToolCallTrace }
   | { type: 'complete'; response: DiagnosisResponse }
   | { type: 'error'; message: string }
+
+export type EvaluationMode = 'retrieval' | 'rag' | 'single_agent' | 'multi_agent'
+
+export interface EvaluationCase {
+  id: string
+  project_id: string
+  name: string
+  question: string
+  expected_files: string[]
+  required_keywords: string[]
+  created_at: string
+  updated_at: string
+}
+
+export interface EvaluationCaseCreate {
+  name: string
+  question: string
+  expected_files: string[]
+  required_keywords: string[]
+}
+
+export interface EvaluationResult {
+  id: string
+  run_id: string
+  case_id: string | null
+  case_name: string
+  question: string
+  expected_files: string[]
+  required_keywords: string[]
+  answer: string
+  retrieved_files: string[]
+  retrieval_score: number
+  keyword_score: number
+  evidence_score: number
+  overall_score: number
+  passed: boolean
+  total_tokens: number
+  duration_ms: number
+  error_message: string | null
+}
+
+export interface EvaluationRunSummary {
+  id: string
+  project_id: string
+  name: string
+  mode: EvaluationMode
+  status: string
+  chat_model: string
+  embedding_model: string
+  chunk_strategies: string[]
+  case_count: number
+  passed_count: number
+  average_retrieval_score: number
+  average_keyword_score: number
+  average_evidence_score: number
+  average_overall_score: number
+  total_tokens: number
+  duration_ms: number
+  error_message: string | null
+  created_at: string
+  completed_at: string | null
+}
+
+export interface EvaluationRunDetail extends EvaluationRunSummary {
+  results: EvaluationResult[]
+}
+
+export interface EvaluationRunCreate {
+  name: string
+  mode: EvaluationMode
+  case_ids: string[]
+  retrieval_limit: number
+  max_iterations: number
+}
