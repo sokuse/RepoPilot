@@ -2,6 +2,7 @@ import type {
   ChunkingStats,
   DiagnosisResponse,
   DiagnosisStreamEvent,
+  MultiAgentDiagnosisResponse,
   Project,
   ProjectCreate,
   RagAnswerResponse,
@@ -134,6 +135,11 @@ export const projectApi = {
   },
   diagnose: (projectId: string, question: string, maxIterations = 3) =>
     request<DiagnosisResponse>(`/projects/${projectId}/diagnosis`, {
+      method: 'POST',
+      body: JSON.stringify({ question, max_iterations: maxIterations }),
+    }),
+  multiAgentDiagnose: (projectId: string, question: string, maxIterations = 3) =>
+    request<MultiAgentDiagnosisResponse>(`/projects/${projectId}/diagnosis/multi-agent`, {
       method: 'POST',
       body: JSON.stringify({ question, max_iterations: maxIterations }),
     }),
