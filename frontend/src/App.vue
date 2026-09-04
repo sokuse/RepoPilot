@@ -23,7 +23,7 @@ import { RouterLink, RouterView } from 'vue-router'
 
       <div class="sidebar-status">
         <span class="status-dot" />
-        Phase 7 · Multi-Agent
+        Phase 8 · Memory RAG
       </div>
     </aside>
 

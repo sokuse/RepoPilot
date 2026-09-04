@@ -14,6 +14,7 @@ from repopilot.schemas.rag import (
     RagRunDetail,
     RagRunSummary,
 )
+from repopilot.services.conversation_service import conversation_service
 from repopilot.services.project_service import project_service
 from repopilot.services.rag_run_service import rag_run_service
 from repopilot.services.rag_service import (
@@ -51,6 +52,18 @@ def _get_ready_project(project_id: UUID, session: SessionDep):
     return project
 
 
+def _conversation_id(
+    project_id: str,
+    conversation_id: UUID | None,
+    session: SessionDep,
+) -> str | None:
+    if conversation_id is None:
+        return None
+    if conversation_service.get(session, project_id, str(conversation_id)) is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    return str(conversation_id)
+
+
 @router.post("/ask", response_model=RagAnswerResponse)
 def ask_repository(
     project_id: UUID,
@@ -65,6 +78,7 @@ def ask_repository(
             project.id,
             payload.question,
             payload.retrieval_limit,
+            _conversation_id(project.id, payload.conversation_id, session),
         )
     except (EmbeddingConfigurationError, ChatConfigurationError) as error:
         raise HTTPException(
@@ -99,6 +113,7 @@ def stream_repository_answer(
                 project.id,
                 payload.question,
                 payload.retrieval_limit,
+                _conversation_id(project.id, payload.conversation_id, session),
             ):
                 yield _stream_event(event)
         except (EmbeddingConfigurationError, ChatConfigurationError):

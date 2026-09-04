@@ -10,6 +10,7 @@ from sqlalchemy.pool import StaticPool
 from repopilot.db.base import Base
 from repopilot.db.session import get_session
 from repopilot.main import app
+from repopilot.models.conversation import Conversation, ConversationMessage, MemoryChunk
 from repopilot.models.knowledge_chunk import KnowledgeChunk
 from repopilot.models.project import Project
 from repopilot.models.rag_run import RagRun
@@ -45,8 +46,23 @@ client = TestClient(app)
 
 
 @pytest.fixture(autouse=True)
-def clean_database() -> Generator[None, None, None]:
+def clean_database(monkeypatch: pytest.MonkeyPatch) -> Generator[None, None, None]:
+    monkeypatch.setattr(
+        "repopilot.api.routes.diagnosis.memory_service.remember",
+        lambda *_args, **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        "repopilot.api.routes.conversations.memory_service.forget_conversation",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        "repopilot.api.routes.conversations.memory_service.remember",
+        lambda *_args, **_kwargs: [],
+    )
     with TestingSessionLocal() as session:
+        session.execute(delete(MemoryChunk))
+        session.execute(delete(ConversationMessage))
+        session.execute(delete(Conversation))
         session.execute(delete(RagRun))
         session.execute(delete(VectorIndexState))
         session.execute(delete(KnowledgeChunk))
@@ -112,6 +128,45 @@ def test_get_and_delete_project() -> None:
     delete_response = client.delete(f"/api/v1/projects/{created['id']}")
     assert delete_response.status_code == 204
     assert client.get(f"/api/v1/projects/{created['id']}").status_code == 404
+
+
+def test_create_read_feedback_and_delete_conversation() -> None:
+    created = create_project()
+    create_response = client.post(
+        f"/api/v1/projects/{created['id']}/conversations",
+        json={"title": "排查代理问题"},
+    )
+    assert create_response.status_code == 201
+    conversation_id = create_response.json()["id"]
+
+    with TestingSessionLocal() as session:
+        message = ConversationMessage(
+            conversation_id=conversation_id,
+            role="assistant",
+            content="请检查代理配置。",
+        )
+        session.add(message)
+        session.commit()
+        message_id = message.id
+
+    detail = client.get(
+        f"/api/v1/projects/{created['id']}/conversations/{conversation_id}"
+    )
+    assert detail.status_code == 200
+    assert detail.json()["messages"][0]["content"] == "请检查代理配置。"
+
+    feedback = client.put(
+        f"/api/v1/projects/{created['id']}/conversations/"
+        f"{conversation_id}/messages/{message_id}/feedback",
+        json={"feedback": "helpful", "note": "已经解决"},
+    )
+    assert feedback.status_code == 200
+    assert feedback.json()["feedback"] == "helpful"
+
+    delete_response = client.delete(
+        f"/api/v1/projects/{created['id']}/conversations/{conversation_id}"
+    )
+    assert delete_response.status_code == 204
 
 
 def test_start_repository_ingestion(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -321,6 +376,11 @@ def test_repository_diagnosis_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
             warnings=[],
         ),
     )
+    indexed_memories = []
+    monkeypatch.setattr(
+        "repopilot.api.routes.diagnosis.memory_service.remember",
+        lambda *args, **_kwargs: indexed_memories.append(args),
+    )
 
     response = client.post(
         f"/api/v1/projects/{created['id']}/diagnosis",
@@ -330,6 +390,8 @@ def test_repository_diagnosis_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
     assert response.status_code == 200
     assert response.json()["tool_calls"][0]["name"] == "semantic_search"
     assert response.json()["iterations"] == 2
+    assert indexed_memories[0][2] == "diagnosis"
+    assert "流式错误如何传递" in indexed_memories[0][4]
 
 
 def test_multi_agent_diagnosis_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:

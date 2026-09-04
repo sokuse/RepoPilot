@@ -1,8 +1,12 @@
 import type {
   ChunkingStats,
+  ConversationDetail,
+  ConversationMessage,
+  ConversationSummary,
   DiagnosisResponse,
   DiagnosisStreamEvent,
   MultiAgentDiagnosisResponse,
+  MemoryStats,
   Project,
   ProjectCreate,
   RagAnswerResponse,
@@ -105,16 +109,42 @@ export const projectApi = {
     request<RagRunSummary[]>(`/projects/${projectId}/rag/runs?limit=${limit}`),
   getRagRun: (projectId: string, runId: string) =>
     request<RagRunDetail>(`/projects/${projectId}/rag/runs/${runId}`),
+  listConversations: (projectId: string) =>
+    request<ConversationSummary[]>(`/projects/${projectId}/conversations`),
+  createConversation: (projectId: string, title = '新对话') =>
+    request<ConversationSummary>(`/projects/${projectId}/conversations`, {
+      method: 'POST',
+      body: JSON.stringify({ title }),
+    }),
+  getConversation: (projectId: string, conversationId: string) =>
+    request<ConversationDetail>(`/projects/${projectId}/conversations/${conversationId}`),
+  memoryStats: (projectId: string) =>
+    request<MemoryStats>(`/projects/${projectId}/conversations/memory/stats`),
+  setMessageFeedback: (
+    projectId: string,
+    conversationId: string,
+    messageId: string,
+    feedback: 'helpful' | 'unhelpful',
+  ) =>
+    request<ConversationMessage>(
+      `/projects/${projectId}/conversations/${conversationId}/messages/${messageId}/feedback`,
+      { method: 'PUT', body: JSON.stringify({ feedback }) },
+    ),
   askRagStream: async (
     projectId: string,
     question: string,
     onEvent: (event: RagStreamEvent) => void,
     retrievalLimit = 8,
+    conversationId?: string,
   ) => {
     const response = await fetch(`${API_PREFIX}/projects/${projectId}/rag/stream`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ question, retrieval_limit: retrievalLimit }),
+      body: JSON.stringify({
+        question,
+        retrieval_limit: retrievalLimit,
+        conversation_id: conversationId,
+      }),
     })
     if (!response.ok) {
       const body = (await response.json().catch(() => null)) as { detail?: string } | null

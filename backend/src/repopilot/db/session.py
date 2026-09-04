@@ -38,6 +38,7 @@ SessionDep = Annotated[Session, Depends(get_session)]
 def create_database_tables() -> None:
     # 先导入模型，让表结构注册进 Base.metadata，再创建尚不存在的表。
     from repopilot.models import (  # noqa: F401
+        conversation,
         knowledge_chunk,
         project,
         rag_run,

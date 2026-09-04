@@ -82,15 +82,55 @@ export interface RagTokenUsage {
 
 export interface RagAnswerResponse {
   run_id: string | null
+  conversation_id: string | null
   project_id: string
   question: string
   answer: string
   citations: RagCitation[]
   retrieved_chunks: SemanticSearchResult[]
+  retrieved_memories: MemorySearchResult[]
   steps: RagExecutionStep[]
   warnings: string[]
   usage: RagTokenUsage
   duration_ms: number
+}
+
+export interface MemorySearchResult {
+  memory_id: string
+  score: number
+  source_type: 'conversation' | 'diagnosis'
+  source_id: string
+  conversation_id: string | null
+  content: string
+}
+
+export interface MemoryStats {
+  project_id: string
+  indexed_memories: number
+  collection_name: string
+}
+
+export interface ConversationSummary {
+  id: string
+  project_id: string
+  title: string
+  created_at: string
+  updated_at: string
+}
+
+export interface ConversationMessage {
+  id: string
+  conversation_id: string
+  role: 'user' | 'assistant'
+  content: string
+  rag_run_id: string | null
+  feedback: 'helpful' | 'unhelpful' | null
+  feedback_note: string | null
+  created_at: string
+}
+
+export interface ConversationDetail extends ConversationSummary {
+  messages: ConversationMessage[]
 }
 
 export interface RagRunSummary {
@@ -126,6 +166,7 @@ export type RagStreamEvent =
   | {
       type: 'retrieval'
       retrieved_chunks: SemanticSearchResult[]
+      retrieved_memories: MemorySearchResult[]
       step: RagExecutionStep
     }
   | { type: 'token'; delta: string }

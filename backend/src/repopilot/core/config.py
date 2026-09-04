@@ -33,6 +33,11 @@ class Settings(BaseSettings):
     qwen_api_key: str | None = None
     embedding_dimensions: int = 1_024
     vector_collection_name: str = "repopilot_chunks"
+    memory_vector_collection_name: str = "repopilot_memories"
+    memory_chunk_size_chars: int = 1_000
+    memory_chunk_overlap_chars: int = 100
+    memory_retrieval_limit: int = 4
+    short_term_message_limit: int = 6
     embedding_batch_size: int = 10
     chat_model_name: str = "qwen-plus"
     rag_retrieval_limit: int = 8

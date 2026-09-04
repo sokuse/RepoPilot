@@ -1,11 +1,19 @@
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
 
+from repopilot.schemas.conversation import MemorySearchResult
 from repopilot.schemas.rag import RagTokenUsage
 from repopilot.schemas.retrieval import SemanticSearchResponse, SemanticSearchResult
 from repopilot.services.rag_run_service import rag_run_service
-from repopilot.services.rag_service import ChatAnswer, ChatStreamPart, RagService
+from repopilot.services.rag_service import (
+    ChatAnswer,
+    ChatStreamPart,
+    RagService,
+    conversation_service,
+    memory_service,
+)
 
 
 class FakeChatProvider:
@@ -41,6 +49,8 @@ def fake_run_tracking(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(rag_run_service, "start", lambda *_args: FakeRun())
     monkeypatch.setattr(rag_run_service, "complete", lambda *_args: None)
     monkeypatch.setattr(rag_run_service, "fail", lambda *_args: None)
+    monkeypatch.setattr(memory_service, "search", lambda *_args: [])
+    monkeypatch.setattr(memory_service, "remember", lambda *_args: [])
 
 
 def fake_search(_session, project_id, query, _limit, _threshold):
@@ -97,6 +107,70 @@ def test_rag_graph_warns_when_answer_has_no_valid_citation(monkeypatch) -> None:
 
     assert response.citations == []
     assert len(response.warnings) == 1
+
+
+def test_rag_answer_is_saved_into_conversation(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "repopilot.services.rag_service.vector_search_service.search",
+        fake_search,
+    )
+    class ContextAwareProvider(FakeChatProvider):
+        def answer(self, question: str, context: str) -> ChatAnswer:
+            assert "上一次确认使用工厂函数" in context
+            assert "[M1]" in context
+            assert "历史回答认为入口在 app.py" in context
+            return super().answer(question, context)
+
+    monkeypatch.setattr(
+        "repopilot.services.rag_service.get_chat_provider",
+        lambda: ContextAwareProvider("应用由 create_app 创建。[S1][M1]"),
+    )
+    saved_messages = []
+    monkeypatch.setattr(
+        conversation_service,
+        "recent_messages",
+        lambda *_args: [
+            SimpleNamespace(role="assistant", content="上一次确认使用工厂函数")
+        ],
+    )
+    monkeypatch.setattr(
+        memory_service,
+        "search",
+        lambda *_args: [
+            MemorySearchResult(
+                memory_id=uuid4(),
+                score=0.91,
+                source_type="conversation",
+                source_id=str(uuid4()),
+                conversation_id=conversation_id,
+                content="历史回答认为入口在 app.py",
+            )
+        ],
+    )
+
+    def save_message(_session, conversation_id, role, content, rag_run_id=None):
+        saved_messages.append((conversation_id, role, content, rag_run_id))
+        return SimpleNamespace(id=str(uuid4()))
+
+    monkeypatch.setattr(
+        conversation_service,
+        "add_message",
+        save_message,
+    )
+
+    conversation_id = str(uuid4())
+    response = RagService.ask(
+        None,
+        str(uuid4()),
+        "应用在哪里创建？",
+        8,
+        conversation_id,
+    )
+
+    assert str(response.conversation_id) == conversation_id
+    assert [message[1] for message in saved_messages] == ["user", "assistant"]
+    assert saved_messages[1][2].startswith("应用由 create_app")
+    assert response.retrieved_memories[0].score == 0.91
 
 
 def test_rag_graph_streams_tokens_and_final_validated_response(monkeypatch) -> None:

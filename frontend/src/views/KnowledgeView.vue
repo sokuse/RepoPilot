@@ -3,9 +3,11 @@ import { onMounted, ref, watch } from 'vue'
 
 import { ApiError, projectApi } from '../services/api'
 import type {
+  ConversationDetail,
+  ConversationSummary,
+  MemoryStats,
   Project,
   RagAnswerResponse,
-  RagRunSummary,
   SemanticSearchResult,
   VectorIndexStats,
 } from '../types/project'
@@ -16,12 +18,14 @@ const indexStats = ref<VectorIndexStats | null>(null)
 const query = ref('')
 const results = ref<SemanticSearchResult[]>([])
 const ragAnswer = ref<RagAnswerResponse | null>(null)
-const ragRuns = ref<RagRunSummary[]>([])
+const conversations = ref<ConversationSummary[]>([])
+const selectedConversationId = ref('')
+const conversationDetail = ref<ConversationDetail | null>(null)
+const memoryStats = ref<MemoryStats | null>(null)
 const loading = ref(true)
 const indexing = ref(false)
 const searching = ref(false)
 const answering = ref(false)
-const loadingRunId = ref<string | null>(null)
 const errorMessage = ref('')
 
 async function loadProjects() {
@@ -49,13 +53,45 @@ async function loadIndexStats() {
   }
 }
 
-async function loadRagRuns() {
-  ragRuns.value = []
+async function loadConversations(selectId?: string) {
+  conversations.value = []
+  conversationDetail.value = null
   if (!selectedProjectId.value) return
   try {
-    ragRuns.value = await projectApi.listRagRuns(selectedProjectId.value)
+    conversations.value = await projectApi.listConversations(selectedProjectId.value)
+    memoryStats.value = await projectApi.memoryStats(selectedProjectId.value)
+    selectedConversationId.value =
+      selectId ??
+      (conversations.value.some((item) => item.id === selectedConversationId.value)
+        ? selectedConversationId.value
+        : conversations.value[0]?.id ?? '')
   } catch {
-    errorMessage.value = '无法读取 RAG 问答历史。'
+    errorMessage.value = '无法读取对话列表。'
+  }
+}
+
+async function createConversation() {
+  if (!selectedProjectId.value) return ''
+  try {
+    const conversation = await projectApi.createConversation(selectedProjectId.value)
+    await loadConversations(conversation.id)
+    return conversation.id
+  } catch {
+    errorMessage.value = '新建对话失败，请确认后端已重启。'
+    return ''
+  }
+}
+
+async function loadConversationDetail() {
+  conversationDetail.value = null
+  if (!selectedProjectId.value || !selectedConversationId.value) return
+  try {
+    conversationDetail.value = await projectApi.getConversation(
+      selectedProjectId.value,
+      selectedConversationId.value,
+    )
+  } catch {
+    errorMessage.value = '无法读取对话消息。'
   }
 }
 
@@ -99,17 +135,21 @@ async function searchKnowledge() {
 async function askKnowledge() {
   if (!selectedProjectId.value || !query.value.trim()) return
   const question = query.value.trim()
+  const conversationId = selectedConversationId.value || (await createConversation())
+  if (!conversationId) return
   answering.value = true
   errorMessage.value = ''
   results.value = []
   // 先创建空回答卡片，后续收到 token 时直接追加，形成打字机式展示。
   ragAnswer.value = {
     run_id: null,
+    conversation_id: conversationId,
     project_id: selectedProjectId.value,
     question,
     answer: '',
     citations: [],
     retrieved_chunks: [],
+    retrieved_memories: [],
     steps: [],
     warnings: [],
     usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
@@ -123,6 +163,7 @@ async function askKnowledge() {
       } else if (event.type === 'retrieval') {
         results.value = event.retrieved_chunks
         ragAnswer.value.retrieved_chunks = event.retrieved_chunks
+        ragAnswer.value.retrieved_memories = event.retrieved_memories
         ragAnswer.value.steps.push(event.step)
       } else if (event.type === 'token') {
         ragAnswer.value.answer += event.delta
@@ -132,7 +173,7 @@ async function askKnowledge() {
         ragAnswer.value = event.response
         results.value = event.response.retrieved_chunks
       }
-    })
+    }, 8, conversationId)
   } catch (error) {
     errorMessage.value =
       error instanceof ApiError && error.status === 409
@@ -142,43 +183,8 @@ async function askKnowledge() {
           : 'RAG 问答失败，请查看后端日志。'
   } finally {
     answering.value = false
-    // 成功与失败都刷新，失败的执行记录同样需要可追溯。
-    void loadRagRuns()
-  }
-}
-
-async function openRagRun(run: RagRunSummary) {
-  if (!selectedProjectId.value) return
-  loadingRunId.value = run.id
-  errorMessage.value = ''
-  try {
-    const detail = await projectApi.getRagRun(selectedProjectId.value, run.id)
-    if (detail.status === 'failed') {
-      errorMessage.value = detail.error_message ?? '这次 RAG 运行失败了。'
-      return
-    }
-    ragAnswer.value = {
-      run_id: detail.id,
-      project_id: detail.project_id,
-      question: detail.question,
-      answer: detail.answer,
-      citations: detail.citations,
-      retrieved_chunks: detail.retrieved_chunks,
-      steps: detail.steps,
-      warnings: detail.warnings,
-      usage: {
-        prompt_tokens: detail.prompt_tokens,
-        completion_tokens: detail.completion_tokens,
-        total_tokens: detail.total_tokens,
-      },
-      duration_ms: detail.duration_ms,
-    }
-    query.value = detail.question
-    results.value = detail.retrieved_chunks
-  } catch {
-    errorMessage.value = '无法读取这次 RAG 运行详情。'
-  } finally {
-    loadingRunId.value = null
+    // 问答完成后刷新当前对话，让用户可以继续追问并提交反馈。
+    void loadConversations(conversationId).then(loadConversationDetail)
   }
 }
 
@@ -186,14 +192,12 @@ function formatDuration(durationMs: number) {
   return durationMs ? `${(durationMs / 1000).toFixed(1)} 秒` : '—'
 }
 
-function formatRunStatus(status: RagRunSummary['status']) {
-  return { running: '执行中', completed: '已完成', failed: '失败' }[status] ?? status
-}
-
 watch(selectedProjectId, () => {
   void loadIndexStats()
-  void loadRagRuns()
+  selectedConversationId.value = ''
+  void loadConversations()
 })
+watch(selectedConversationId, () => void loadConversationDetail())
 onMounted(() => void loadProjects())
 </script>
 
@@ -205,7 +209,7 @@ onMounted(() => void loadProjects())
         <h1>知识检索</h1>
         <p>从 Qdrant 检索相关代码，再由 LangGraph 编排 Qwen 生成带真实引用的中文答案。</p>
       </div>
-      <div class="phase-pill">第四阶段 · 流式 RAG</div>
+      <div class="phase-pill">第八阶段 · 对话 RAG</div>
     </header>
 
     <article class="panel retrieval-control">
@@ -268,30 +272,43 @@ onMounted(() => void loadProjects())
       <p v-if="errorMessage" class="error-banner">{{ errorMessage }}</p>
     </article>
 
-    <article class="panel rag-history-panel">
+    <article class="panel conversation-panel">
       <div class="panel-heading">
-        <div><p class="eyebrow">EXECUTION HISTORY</p><h2>问答追踪</h2></div>
-        <button class="text-button" type="button" @click="loadRagRuns">刷新</button>
-      </div>
-      <p v-if="!ragRuns.length" class="history-empty">完成一次“生成回答”后，这里会保存执行记录。</p>
-      <div v-else class="rag-run-list">
-        <button
-          v-for="run in ragRuns"
-          :key="run.id"
-          class="rag-run-item"
-          type="button"
-          :disabled="loadingRunId === run.id"
-          @click="openRagRun(run)"
-        >
-          <span class="run-status" :data-status="run.status">{{ formatRunStatus(run.status) }}</span>
-          <span class="run-question">{{ run.question }}</span>
-          <small>
-            {{ run.chat_model }} · {{ run.total_tokens }} tokens ·
-            {{ formatDuration(run.duration_ms) }} · {{ run.citation_count }} 引用
-          </small>
-          <time>{{ new Date(run.created_at).toLocaleString() }}</time>
+        <div><p class="eyebrow">CONVERSATION MEMORY</p><h2>对话记录</h2></div>
+        <button class="secondary-button" type="button" :disabled="!selectedProjectId" @click="createConversation">
+          新建对话
         </button>
       </div>
+      <p class="memory-summary">
+        短期记忆读取当前对话最近 6 条消息；长期记忆已索引
+        {{ memoryStats?.indexed_memories ?? 0 }} 个切片。
+      </p>
+      <label class="conversation-selector">
+        当前对话
+        <select v-model="selectedConversationId">
+          <option value="" disabled>新建或选择一段对话</option>
+          <option v-for="conversation in conversations" :key="conversation.id" :value="conversation.id">
+            {{ conversation.title }}
+          </option>
+        </select>
+      </label>
+      <div v-if="conversationDetail?.messages.length" class="conversation-messages">
+        <article
+          v-for="message in conversationDetail.messages"
+          :key="message.id"
+          :data-role="message.role"
+          class="conversation-message"
+        >
+          <strong>{{ message.role === 'user' ? '你' : 'RepoPilot' }}</strong>
+          <p>{{ message.content }}</p>
+          <div v-if="message.role === 'assistant'" class="message-feedback">
+            <button type="button" @click="projectApi.setMessageFeedback(selectedProjectId, selectedConversationId, message.id, 'helpful').then(loadConversationDetail)">有帮助</button>
+            <button type="button" @click="projectApi.setMessageFeedback(selectedProjectId, selectedConversationId, message.id, 'unhelpful').then(loadConversationDetail)">没帮助</button>
+            <small v-if="message.feedback">已记录：{{ message.feedback === 'helpful' ? '有帮助' : '没帮助' }}</small>
+          </div>
+        </article>
+      </div>
+      <p v-else class="history-empty">新问题和回答会自动保存在当前对话中。</p>
     </article>
 
     <article v-if="ragAnswer" class="answer-panel">
@@ -330,6 +347,14 @@ onMounted(() => void loadProjects())
             </small>
           </div>
         </div>
+      </div>
+      <div v-if="ragAnswer.retrieved_memories.length" class="memory-source-list">
+        <strong>召回的历史记忆</strong>
+        <article v-for="memory in ragAnswer.retrieved_memories" :key="memory.memory_id">
+          <span>{{ memory.source_type === 'diagnosis' ? '历史诊断' : '历史对话' }}</span>
+          <small>相似度 {{ (memory.score * 100).toFixed(1) }}%</small>
+          <p>{{ memory.content }}</p>
+        </article>
       </div>
     </article>
 

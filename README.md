@@ -2,8 +2,8 @@
 
 RepoPilot 是一个面向多仓库研发团队的软件维护知识、故障诊断与 Agent 评测平台。
 
-当前仓库处于第七阶段：已完成仓库采集、可追溯知识切片、语义检索、流式 RAG、
-Function Call 工具诊断，并新增由 LangGraph 编排的规划、调查和审查多 Agent 协作链路。
+当前仓库已完成第八阶段：在仓库采集、可追溯 RAG、Function Call 和多 Agent 诊断之上，
+新增短期对话上下文、长期向量记忆、历史诊断召回与回答反馈闭环。
 
 ## 目录
 
@@ -46,6 +46,11 @@ frontend/  Vue 3、TypeScript、Vite
 - 保留单 Agent 普通/流式接口，并新增 `POST /api/v1/projects/{project_id}/diagnosis/multi-agent`
 - 对调查草稿进行证据评分与修订，审查格式异常时安全回退到原始草稿
 - 在智能诊断页面切换单 Agent 实时模式与多 Agent 审查模式
+- 通过会话与消息表保存多轮 RAG 问答，并将 Assistant 消息关联到原始 RAG 运行记录
+- 在知识检索页面创建、切换和查看历史对话，并记录回答“有帮助/没帮助”的反馈
+- 将问答和诊断结论切片、Embedding 后写入独立的 `repopilot_memories` Qdrant collection
+- 新问题同时检索仓库代码、当前对话最近消息、历史对话和过去诊断记录
+- 返回并展示 `[M编号]` 历史记忆来源、相似度和长期记忆索引数量
 
 ## 本地启动
 

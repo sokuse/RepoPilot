@@ -3,12 +3,14 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from repopilot.schemas.conversation import MemorySearchResult
 from repopilot.schemas.retrieval import SemanticSearchResult
 
 
 class RagAskRequest(BaseModel):
     question: str = Field(min_length=2, max_length=2000)
     retrieval_limit: int = Field(default=8, ge=3, le=12)
+    conversation_id: UUID | None = None
 
 
 class RagCitation(BaseModel):
@@ -35,11 +37,13 @@ class RagTokenUsage(BaseModel):
 
 class RagAnswerResponse(BaseModel):
     run_id: UUID | None = None
+    conversation_id: UUID | None = None
     project_id: UUID
     question: str
     answer: str
     citations: list[RagCitation]
     retrieved_chunks: list[SemanticSearchResult]
+    retrieved_memories: list[MemorySearchResult] = Field(default_factory=list)
     steps: list[RagExecutionStep]
     warnings: list[str]
     usage: RagTokenUsage = Field(default_factory=RagTokenUsage)

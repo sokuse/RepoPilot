@@ -1,3 +1,4 @@
+import logging
 import re
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -12,6 +13,7 @@ from openai import OpenAI
 from sqlalchemy.orm import Session
 
 from repopilot.core.config import settings
+from repopilot.schemas.conversation import MemorySearchResult
 from repopilot.schemas.rag import (
     RagAnswerResponse,
     RagCitation,
@@ -19,10 +21,13 @@ from repopilot.schemas.rag import (
     RagTokenUsage,
 )
 from repopilot.schemas.retrieval import SemanticSearchResult
+from repopilot.services.conversation_service import conversation_service
+from repopilot.services.memory_service import memory_service
 from repopilot.services.rag_run_service import rag_run_service
 from repopilot.services.vector_search_service import vector_search_service
 
 SOURCE_REFERENCE = re.compile(r"\[S(\d+)]")
+logger = logging.getLogger(__name__)
 
 
 class ChatConfigurationError(Exception):
@@ -63,9 +68,10 @@ class QwenChatProvider:
             {
                 "role": "system",
                 "content": (
-                    "你是 RepoPilot 的代码仓库分析助手。只能依据给定的检索资料回答，"
+                    "你是 RepoPilot 的代码仓库分析助手。依据代码资料和历史记忆回答，"
                     "不得使用资料之外的事实。每个关键结论后必须使用 [S1]、[S2] 形式"
-                    "标注来源。如果资料不足，请明确说明无法从当前仓库确认。使用中文，"
+                    "标注代码来源；引用历史经验时使用 [M1]、[M2]。如果资料不足，"
+                    "请明确说明；标记为没有帮助的历史只能作为反例，不能当作已确认结论。使用中文，"
                     "先给结论，再解释关键调用链或实现细节。"
                 ),
             },
@@ -127,6 +133,8 @@ class RagState(TypedDict, total=False):
     question: str
     retrieval_limit: int
     retrieved_chunks: list[SemanticSearchResult]
+    retrieved_memories: list[MemorySearchResult]
+    short_term_context: str
     context: str
     answer: str
     citations: list[RagCitation]
@@ -134,6 +142,7 @@ class RagState(TypedDict, total=False):
     warnings: list[str]
     stream_tokens: bool
     usage: RagTokenUsage
+    conversation_id: str | None
 
 
 # 语义召回，负责检索并添加上下文。
@@ -145,6 +154,7 @@ def retrieve_node(state: RagState) -> dict[str, object]:
         state["retrieval_limit"],
         None,
     )
+    memories = memory_service.search(state["project_id"], state["question"])
     context_parts: list[str] = []
     context_chars = 0
     selected_chunks: list[SemanticSearchResult] = []
@@ -160,10 +170,22 @@ def retrieve_node(state: RagState) -> dict[str, object]:
         selected_chunks.append(result)
         context_chars += len(source)
 
+    memory_parts = [
+        f"[M{index}] 类型：{memory.source_type}，相似度：{memory.score:.4f}\n{memory.content}"
+        for index, memory in enumerate(memories, start=1)
+    ]
+    short_term = state.get("short_term_context", "")
+    if short_term:
+        context_parts.append(f"[当前对话最近消息]\n{short_term}")
+    context_parts.extend(memory_parts)
+
     step = RagExecutionStep(
         name="retrieve",
         label="语义召回",
-        detail=f"从 Qdrant 召回 {len(selected_chunks)} 个相关知识切片",
+        detail=(
+            f"召回 {len(selected_chunks)} 个仓库切片、{len(memories)} 条长期记忆，"
+            f"并加载当前对话最近消息"
+        ),
     )
     if state.get("stream_tokens"):
         writer = get_stream_writer()
@@ -171,12 +193,14 @@ def retrieve_node(state: RagState) -> dict[str, object]:
             {
                 "type": "retrieval",
                 "retrieved_chunks": [chunk.model_dump(mode="json") for chunk in selected_chunks],
+                "retrieved_memories": [memory.model_dump(mode="json") for memory in memories],
                 "step": step.model_dump(mode="json"),
             }
         )
 
     return {
         "retrieved_chunks": selected_chunks,
+        "retrieved_memories": memories,
         "context": "\n\n".join(context_parts),
         "steps": [step],
     }
@@ -248,11 +272,13 @@ def validate_node(state: RagState) -> dict[str, object]:
     steps = [*state.get("steps", []), step]
     if state.get("stream_tokens"):
         response = RagAnswerResponse(
+            conversation_id=state.get("conversation_id"),
             project_id=state["project_id"],
             question=state["question"],
             answer=state["answer"],
             citations=citations,
             retrieved_chunks=chunks,
+            retrieved_memories=state.get("retrieved_memories", []),
             steps=steps,
             warnings=warnings,
             usage=state.get("usage", RagTokenUsage()),
@@ -289,7 +315,18 @@ class RagService:
         project_id: str,
         question: str,
         retrieval_limit: int,
+        conversation_id: str | None = None,
     ) -> RagAnswerResponse:
+        short_term_context = ""
+        if conversation_id:
+            recent = conversation_service.recent_messages(
+                session, conversation_id, settings.short_term_message_limit
+            )
+            short_term_context = "\n".join(
+                f"{'用户' if message.role == 'user' else '助手'}：{message.content}"
+                for message in recent
+            )
+            conversation_service.add_message(session, conversation_id, "user", question)
         run = rag_run_service.start(session, project_id, question, retrieval_limit)
         started = perf_counter()
         try:
@@ -301,20 +338,40 @@ class RagService:
                     "retrieval_limit": retrieval_limit,
                     "steps": [],
                     "warnings": [],
+                    "conversation_id": conversation_id,
+                    "short_term_context": short_term_context,
                 }
             )
             response = RagAnswerResponse(
                 run_id=run.id,
+                conversation_id=conversation_id,
                 project_id=project_id,
                 question=question,
                 answer=result["answer"],
                 citations=result.get("citations", []),
                 retrieved_chunks=result["retrieved_chunks"],
+                retrieved_memories=result.get("retrieved_memories", []),
                 steps=result.get("steps", []),
                 warnings=result.get("warnings", []),
                 usage=result.get("usage", RagTokenUsage()),
                 duration_ms=int((perf_counter() - started) * 1000),
             )
+            if conversation_id:
+                message = conversation_service.add_message(
+                    session, conversation_id, "assistant", response.answer, run.id
+                )
+                try:
+                    memory_service.remember(
+                        session,
+                        project_id,
+                        "conversation",
+                        message.id,
+                        f"用户问题：{question}\n助手回答：{response.answer}",
+                        conversation_id,
+                    )
+                except Exception:
+                    logger.exception("Failed to index conversation memory")
+                    response.warnings.append("回答已保存，但长期记忆向量化失败。")
             rag_run_service.complete(session, run.id, response)
             return response
         except Exception as error:
@@ -332,8 +389,19 @@ class RagService:
         project_id: str,
         question: str,
         retrieval_limit: int,
+        conversation_id: str | None = None,
     ) -> Iterator[dict[str, object]]:
         """运行同一张 LangGraph，并向 HTTP 层逐个产出自定义流事件。"""
+        short_term_context = ""
+        if conversation_id:
+            recent = conversation_service.recent_messages(
+                session, conversation_id, settings.short_term_message_limit
+            )
+            short_term_context = "\n".join(
+                f"{'用户' if message.role == 'user' else '助手'}：{message.content}"
+                for message in recent
+            )
+            conversation_service.add_message(session, conversation_id, "user", question)
         run = rag_run_service.start(session, project_id, question, retrieval_limit)
         started = perf_counter()
         yield {"type": "run", "run_id": run.id}
@@ -347,6 +415,8 @@ class RagService:
                     "steps": [],
                     "warnings": [],
                     "stream_tokens": True,
+                    "conversation_id": conversation_id,
+                    "short_term_context": short_term_context,
                 },
                 stream_mode="custom",
                 version="v2",
@@ -361,6 +431,22 @@ class RagService:
                             "duration_ms": int((perf_counter() - started) * 1000),
                         }
                     )
+                    if conversation_id:
+                        message = conversation_service.add_message(
+                            session, conversation_id, "assistant", response.answer, run.id
+                        )
+                        try:
+                            memory_service.remember(
+                                session,
+                                project_id,
+                                "conversation",
+                                message.id,
+                                f"用户问题：{question}\n助手回答：{response.answer}",
+                                conversation_id,
+                            )
+                        except Exception:
+                            logger.exception("Failed to index conversation memory")
+                            response.warnings.append("回答已保存，但长期记忆向量化失败。")
                     rag_run_service.complete(session, run.id, response)
                     event = {"type": "complete", "response": response.model_dump(mode="json")}
                 yield event

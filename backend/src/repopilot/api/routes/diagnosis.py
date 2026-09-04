@@ -1,7 +1,7 @@
 import json
 import logging
 from collections.abc import Iterator
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import StreamingResponse
@@ -14,6 +14,7 @@ from repopilot.schemas.diagnosis import (
     MultiAgentDiagnosisResponse,
 )
 from repopilot.services.diagnosis_service import EmptyDiagnosisAnswerError, diagnosis_service
+from repopilot.services.memory_service import memory_service
 from repopilot.services.multi_agent_diagnosis_service import multi_agent_diagnosis_service
 from repopilot.services.project_service import project_service
 from repopilot.services.rag_service import ChatConfigurationError
@@ -47,6 +48,25 @@ def _get_ready_project(project_id: UUID, session: SessionDep):
     return project
 
 
+def _remember_diagnosis(
+    session: SessionDep,
+    project_id: str,
+    question: str,
+    answer: str,
+) -> None:
+    try:
+        memory_service.remember(
+            session,
+            project_id,
+            "diagnosis",
+            str(uuid4()),
+            f"诊断问题：{question}\n诊断结论：{answer}",
+        )
+    except Exception:
+        # 长期记忆属于增强能力，索引失败不能覆盖已经成功生成的诊断结果。
+        logger.exception("Failed to index diagnosis memory")
+
+
 @router.post("", response_model=DiagnosisResponse)
 def diagnose_repository(
     project_id: UUID,
@@ -55,12 +75,14 @@ def diagnose_repository(
 ) -> DiagnosisResponse:
     project = _get_ready_project(project_id, session)
     try:
-        return diagnosis_service.diagnose(
+        response = diagnosis_service.diagnose(
             session,
             project.id,
             payload.question,
             payload.max_iterations,
         )
+        _remember_diagnosis(session, project.id, payload.question, response.answer)
+        return response
     except (EmbeddingConfigurationError, ChatConfigurationError) as error:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -91,12 +113,14 @@ def diagnose_repository_with_multiple_agents(
 ) -> MultiAgentDiagnosisResponse:
     project = _get_ready_project(project_id, session)
     try:
-        return multi_agent_diagnosis_service.diagnose(
+        response = multi_agent_diagnosis_service.diagnose(
             session,
             project.id,
             payload.question,
             payload.max_iterations,
         )
+        _remember_diagnosis(session, project.id, payload.question, response.final_answer)
+        return response
     except (EmbeddingConfigurationError, ChatConfigurationError) as error:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -131,6 +155,14 @@ def stream_repository_diagnosis(
                 payload.question,
                 payload.max_iterations,
             ):
+                if event.get("type") == "complete":
+                    response = event.get("response", {})
+                    if isinstance(response, dict):
+                        answer = response.get("answer")
+                        if isinstance(answer, str):
+                            _remember_diagnosis(
+                                session, project.id, payload.question, answer
+                            )
                 yield _stream_event(event)
         except (EmbeddingConfigurationError, ChatConfigurationError):
             yield _stream_error("Qwen API Key 尚未配置。")
