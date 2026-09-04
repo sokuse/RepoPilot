@@ -2,8 +2,8 @@
 
 RepoPilot 是一个面向多仓库研发团队的软件维护知识、故障诊断与 Agent 评测平台。
 
-当前仓库处于第六阶段：已完成仓库采集、可追溯知识切片、语义检索、
-流式 RAG 问答与执行追踪，并新增由 LangGraph 编排的 Qwen Function Call 智能诊断。
+当前仓库处于第七阶段：已完成仓库采集、可追溯知识切片、语义检索、流式 RAG、
+Function Call 工具诊断，并新增由 LangGraph 编排的规划、调查和审查多 Agent 协作链路。
 
 ## 目录
 
@@ -41,6 +41,10 @@ frontend/  Vue 3、TypeScript、Vite
 - 由 Qwen 自主选择工具，LangGraph 循环执行“模型决策 → 工具调用 → 继续分析”
 - 通过 `POST /api/v1/projects/{project_id}/diagnosis` 运行有轮数上限的智能诊断
 - 在智能诊断页面展示最终结论、累计 Token 以及每次 Function Call 的参数和结果
+- 通过外层 LangGraph 串联规划 Agent、工具调查 Agent 和证据审查 Agent
+- 保留单 Agent 接口，并新增 `POST /api/v1/projects/{project_id}/diagnosis/multi-agent`
+- 对调查草稿进行证据评分与修订，审查格式异常时安全回退到原始草稿
+- 在智能诊断页面分别展示每个 Agent 的输出、耗时、Token 和最终审查结果
 
 ## 本地启动
 

@@ -23,7 +23,7 @@ import { RouterLink, RouterView } from 'vue-router'
 
       <div class="sidebar-status">
         <span class="status-dot" />
-        Phase 6 · Function Call
+        Phase 7 · Multi-Agent
       </div>
     </aside>
 

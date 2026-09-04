@@ -2,12 +2,12 @@
 import { onMounted, ref } from 'vue'
 
 import { ApiError, projectApi } from '../services/api'
-import type { DiagnosisResponse, Project } from '../types/project'
+import type { MultiAgentDiagnosisResponse, Project } from '../types/project'
 
 const projects = ref<Project[]>([])
 const selectedProjectId = ref('')
 const question = ref('')
-const result = ref<DiagnosisResponse | null>(null)
+const result = ref<MultiAgentDiagnosisResponse | null>(null)
 const loading = ref(true)
 const diagnosing = ref(false)
 const errorMessage = ref('')
@@ -30,7 +30,10 @@ async function diagnose() {
   result.value = null
   errorMessage.value = ''
   try {
-    result.value = await projectApi.diagnose(selectedProjectId.value, question.value.trim())
+    result.value = await projectApi.multiAgentDiagnose(
+      selectedProjectId.value,
+      question.value.trim(),
+    )
   } catch (error) {
     errorMessage.value =
       error instanceof ApiError && error.status === 409
@@ -65,11 +68,11 @@ onMounted(() => void loadProjects())
   <section class="page diagnosis-page">
     <header class="page-header">
       <div>
-        <p class="eyebrow">TOOL-CALLING AGENT</p>
+        <p class="eyebrow">MULTI-AGENT DIAGNOSIS</p>
         <h1>智能诊断</h1>
-        <p>让 Qwen 自主选择仓库工具，逐步查找代码证据，再生成可核对的诊断结论。</p>
+        <p>规划、调查和审查 Agent 分工协作，调用仓库工具取得证据并修订最终结论。</p>
       </div>
-      <div class="phase-pill">第六阶段 · Function Call</div>
+      <div class="phase-pill">第七阶段 · Multi-Agent</div>
     </header>
 
     <article class="panel diagnosis-control">
@@ -94,7 +97,7 @@ onMounted(() => void loadProjects())
           />
         </label>
         <button class="primary-button" type="submit" :disabled="!selectedProjectId || diagnosing">
-          {{ diagnosing ? 'Agent 正在调查…' : '开始智能诊断' }}
+          {{ diagnosing ? '多 Agent 正在协作…' : '开始多 Agent 诊断' }}
         </button>
       </form>
       <p v-if="errorMessage" class="error-banner">{{ errorMessage }}</p>
@@ -102,19 +105,48 @@ onMounted(() => void loadProjects())
 
     <section v-if="diagnosing" class="panel diagnosis-progress">
       <span class="agent-pulse" />
-      <div><strong>Agent 正在调用仓库工具</strong><small>模型可能进行多轮搜索与文件读取。</small></div>
+      <div>
+        <strong>规划、调查与审查 Agent 正在协作</strong>
+        <small>调查阶段可能进行多轮搜索与文件读取，请耐心等待。</small>
+      </div>
     </section>
 
     <template v-if="result">
+      <section class="agent-workflow-section">
+        <div class="results-heading">
+          <p class="eyebrow">AGENT WORKFLOW</p>
+          <span>{{ result.agents.length }} 个 Agent · 累计 {{ result.usage.total_tokens }} tokens</span>
+        </div>
+        <div class="agent-step-list">
+          <article v-for="(agent, index) in result.agents" :key="agent.name" class="agent-step-card">
+            <header>
+              <span>{{ index + 1 }}</span>
+              <div><strong>{{ agent.label }}</strong><small>{{ agent.duration_ms }} ms · {{ agent.usage.total_tokens }} tokens</small></div>
+            </header>
+            <div class="agent-step-output">{{ agent.output }}</div>
+          </article>
+        </div>
+      </section>
+
       <article class="answer-panel diagnosis-answer">
         <div class="answer-heading">
           <div><p class="eyebrow">DIAGNOSIS</p><h2>诊断结论</h2></div>
           <span>
-            {{ result.model }} · {{ result.iterations }} 轮 · {{ result.usage.total_tokens }} tokens ·
-            {{ result.duration_ms }} ms
+            审查 {{ result.review.score }} 分 · {{ result.model }} · {{ result.duration_ms }} ms
           </span>
         </div>
-        <div class="answer-content">{{ result.answer }}</div>
+        <div class="answer-content">{{ result.final_answer }}</div>
+        <div :class="['review-summary', { passed: result.review.passed }]">
+          <strong>{{ result.review.passed ? '审查通过' : '审查后已修订' }}</strong>
+          <span>证据质量评分 {{ result.review.score }}/100</span>
+        </div>
+        <ul v-if="result.review.issues.length" class="review-issues">
+          <li v-for="issue in result.review.issues" :key="issue">{{ issue }}</li>
+        </ul>
+        <details class="draft-answer">
+          <summary>查看审查前的调查草稿</summary>
+          <div>{{ result.draft_answer }}</div>
+        </details>
         <p v-for="warning in result.warnings" :key="warning" class="answer-warning">
           {{ warning }}
         </p>

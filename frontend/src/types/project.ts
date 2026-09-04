@@ -154,3 +154,33 @@ export interface DiagnosisResponse {
   tool_calls: ToolCallTrace[]
   warnings: string[]
 }
+
+export interface AgentExecutionStep {
+  name: string
+  label: string
+  output: string
+  duration_ms: number
+  usage: RagTokenUsage
+}
+
+export interface DiagnosisReview {
+  passed: boolean
+  score: number
+  issues: string[]
+  final_answer: string
+}
+
+export interface MultiAgentDiagnosisResponse {
+  project_id: string
+  question: string
+  model: string
+  plan: string
+  draft_answer: string
+  review: DiagnosisReview
+  final_answer: string
+  tool_calls: ToolCallTrace[]
+  agents: AgentExecutionStep[]
+  usage: RagTokenUsage
+  duration_ms: number
+  warnings: string[]
+}

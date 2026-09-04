@@ -15,7 +15,13 @@ from repopilot.models.project import Project
 from repopilot.models.rag_run import RagRun
 from repopilot.models.repository_file import RepositoryFile
 from repopilot.models.vector_index_state import VectorIndexState
-from repopilot.schemas.diagnosis import DiagnosisResponse, ToolCallTrace
+from repopilot.schemas.diagnosis import (
+    AgentExecutionStep,
+    DiagnosisResponse,
+    DiagnosisReview,
+    MultiAgentDiagnosisResponse,
+    ToolCallTrace,
+)
 from repopilot.schemas.rag import RagAnswerResponse, RagExecutionStep, RagTokenUsage
 from repopilot.schemas.retrieval import SemanticSearchResult
 from repopilot.services.rag_run_service import rag_run_service
@@ -324,3 +330,53 @@ def test_repository_diagnosis_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
     assert response.status_code == 200
     assert response.json()["tool_calls"][0]["name"] == "semantic_search"
     assert response.json()["iterations"] == 2
+
+
+def test_multi_agent_diagnosis_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
+    created = create_project()
+    with TestingSessionLocal() as session:
+        project = session.get(Project, created["id"])
+        assert project is not None
+        project.status = "ready"
+        session.commit()
+
+    usage = RagTokenUsage(prompt_tokens=80, completion_tokens=20, total_tokens=100)
+    monkeypatch.setattr(
+        "repopilot.api.routes.diagnosis.multi_agent_diagnosis_service.diagnose",
+        lambda _session, project_id, question, _max_iterations: MultiAgentDiagnosisResponse(
+            project_id=project_id,
+            question=question,
+            model="qwen-test",
+            plan="搜索路由并读取入口文件。",
+            draft_answer="调查草稿。",
+            review=DiagnosisReview(
+                passed=True,
+                score=90,
+                issues=[],
+                final_answer="经过审查的最终回答。",
+            ),
+            final_answer="经过审查的最终回答。",
+            tool_calls=[],
+            agents=[
+                AgentExecutionStep(
+                    name="planner",
+                    label="规划 Agent",
+                    output="搜索路由。",
+                    duration_ms=20,
+                    usage=usage,
+                )
+            ],
+            usage=usage,
+            duration_ms=100,
+            warnings=[],
+        ),
+    )
+
+    response = client.post(
+        f"/api/v1/projects/{created['id']}/diagnosis/multi-agent",
+        json={"question": "路由如何注册？", "max_iterations": 3},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["review"]["score"] == 90
+    assert response.json()["final_answer"] == "经过审查的最终回答。"

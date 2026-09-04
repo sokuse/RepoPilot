@@ -279,6 +279,37 @@ button, input, select { font: inherit; }
 }
 @keyframes agent-pulse { 70% { box-shadow: 0 0 0 10px rgb(131 185 77 / 0%); } }
 .diagnosis-answer { margin-top: 18px; }
+.agent-workflow-section { margin-top: 28px; }
+.agent-step-list { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.agent-step-card {
+  overflow: hidden; min-width: 0; border: 1px solid #d9ded6; border-radius: 14px;
+  background: #fbfcf9; box-shadow: 0 8px 24px rgb(29 54 39 / 4%);
+}
+.agent-step-card header { display: flex; gap: 11px; align-items: center; padding: 15px 16px; }
+.agent-step-card header > span {
+  display: grid; width: 29px; height: 29px; flex: 0 0 auto; place-items: center;
+  border-radius: 50%; color: #24412e; background: #ddefc0; font-size: 13px; font-weight: 800;
+}
+.agent-step-card header strong, .agent-step-card header small { display: block; }
+.agent-step-card header strong { font-size: 16px; }
+.agent-step-card header small { margin-top: 3px; color: #748078; font-size: 13px; }
+.agent-step-output {
+  overflow: auto; max-height: 290px; padding: 16px; border-top: 1px solid #e1e6df;
+  color: #405047; background: #f7f9f5; font-size: 14px; line-height: 1.7;
+  white-space: pre-wrap;
+}
+.review-summary {
+  display: flex; justify-content: space-between; gap: 15px; margin-top: 18px; padding: 13px 15px;
+  border-radius: 10px; color: #7a4d31; background: #fff0df; font-size: 14px;
+}
+.review-summary.passed { color: #31583e; background: #e7f4e3; }
+.review-issues { margin: 13px 0 0; padding: 0 0 0 22px; color: #6d5140; font-size: 14px; line-height: 1.7; }
+.draft-answer { margin-top: 16px; color: #607067; font-size: 14px; }
+.draft-answer summary { cursor: pointer; font-weight: 700; }
+.draft-answer div {
+  margin-top: 10px; padding: 15px; border: 1px solid #e0e6df; border-radius: 9px;
+  background: #f8faf6; line-height: 1.75; white-space: pre-wrap;
+}
 .tool-trace-section { display: grid; gap: 11px; margin-top: 28px; }
 .tool-card { overflow: hidden; border: 1px solid #d9ded6; border-radius: 14px; background: #fbfcf9; }
 .tool-card header {
@@ -314,6 +345,7 @@ button, input, select { font: inherit; }
   .content-grid { grid-template-columns: 1fr; }
   .project-selector { grid-template-columns: 1fr; align-items: stretch; }
   .workflow-steps { grid-template-columns: 1fr; }
+  .agent-step-list { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 640px) {
