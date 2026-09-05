@@ -21,6 +21,7 @@ const runName = ref('RAG 基线实验')
 const loading = ref(true)
 const saving = ref(false)
 const running = ref(false)
+const deletingRunId = ref<string | null>(null)
 const errorMessage = ref('')
 
 const caseName = ref('')
@@ -137,6 +138,27 @@ async function openRun(run: EvaluationRunSummary) {
   activeRun.value = await projectApi.getEvaluationRun(selectedProjectId.value, run.id)
 }
 
+async function removeRun(run: EvaluationRunSummary) {
+  if (!selectedProjectId.value) return
+  if (!window.confirm(`确定删除历史实验“${run.name}”吗？该实验的逐题结果也会一并删除。`)) return
+
+  deletingRunId.value = run.id
+  errorMessage.value = ''
+  try {
+    await projectApi.deleteEvaluationRun(selectedProjectId.value, run.id)
+    runs.value = runs.value.filter((item) => item.id !== run.id)
+    if (activeRun.value?.id === run.id) {
+      activeRun.value = runs.value[0]
+        ? await projectApi.getEvaluationRun(selectedProjectId.value, runs.value[0].id)
+        : null
+    }
+  } catch (error) {
+    errorMessage.value = error instanceof ApiError ? error.message : '删除历史实验失败。'
+  } finally {
+    deletingRunId.value = null
+  }
+}
+
 function formatMode(value: EvaluationMode) {
   return modeLabels[value].split(' · ')[0]
 }
@@ -233,7 +255,16 @@ onMounted(() => void loadProjects())
         <article class="panel evaluation-history">
           <div class="panel-heading"><div><p class="eyebrow">EXPERIMENTS</p><h2>历史实验</h2></div></div>
           <div v-if="runs.length" class="evaluation-run-list">
-            <button v-for="run in runs" :key="run.id" type="button" @click="openRun(run)"><strong>{{ run.name }}</strong><span>{{ formatMode(run.mode) }} · {{ run.average_overall_score.toFixed(1) }} 分 · {{ run.total_tokens }} tokens</span><small>{{ new Date(run.created_at).toLocaleString() }}</small></button>
+            <article v-for="run in runs" :key="run.id" class="evaluation-run-item" :data-active="activeRun?.id === run.id">
+              <button class="evaluation-run-open" type="button" @click="openRun(run)">
+                <strong>{{ run.name }}</strong>
+                <span>{{ formatMode(run.mode) }} · {{ run.average_overall_score.toFixed(1) }} 分 · {{ run.total_tokens }} tokens</span>
+                <small>{{ new Date(run.created_at).toLocaleString() }}</small>
+              </button>
+              <button class="delete-button" type="button" :disabled="deletingRunId === run.id" @click="removeRun(run)">
+                {{ deletingRunId === run.id ? '删除中…' : '删除' }}
+              </button>
+            </article>
           </div>
           <p v-else class="history-empty">不同模式的实验会保存在这里，方便横向比较。</p>
         </article>

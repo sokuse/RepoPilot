@@ -84,6 +84,16 @@ def list_evaluation_runs(
     return evaluation_service.list_runs(session, project.id)
 
 
+@router.delete("/runs/{run_id}", status_code=204)
+def delete_evaluation_run(
+    project_id: UUID, run_id: UUID, session: SessionDep
+) -> Response:
+    project = _ready_project(project_id, session)
+    if not evaluation_service.delete_run(session, project.id, str(run_id)):
+        raise HTTPException(status_code=404, detail="Evaluation run not found")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @router.get("/runs/{run_id}", response_model=EvaluationRunDetail)
 def get_evaluation_run(
     project_id: UUID, run_id: UUID, session: SessionDep

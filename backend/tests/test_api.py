@@ -235,6 +235,50 @@ def test_reject_evaluation_case_with_file_outside_scanned_repository() -> None:
     assert "不在当前仓库扫描清单" in response.json()["detail"]
 
 
+def test_delete_evaluation_run_and_its_results() -> None:
+    created = create_project()
+    with TestingSessionLocal() as session:
+        project = session.get(Project, created["id"])
+        assert project is not None
+        project.status = "ready"
+        run = EvaluationRun(
+            project_id=project.id,
+            name="待删除实验",
+            mode="retrieval",
+            status="completed",
+            chat_model="qwen-test",
+            embedding_model="embedding-test",
+        )
+        session.add(run)
+        session.flush()
+        session.add(
+            EvaluationResult(
+                run_id=run.id,
+                case_id=None,
+                case_name="入口文件",
+                question="入口在哪里？",
+                expected_files=["main.py"],
+                required_keywords=["FastAPI"],
+            )
+        )
+        session.commit()
+        run_id = run.id
+
+    response = client.delete(
+        f"/api/v1/projects/{created['id']}/evaluations/runs/{run_id}"
+    )
+
+    assert response.status_code == 204
+    with TestingSessionLocal() as session:
+        assert session.get(EvaluationRun, run_id) is None
+        assert session.query(EvaluationResult).count() == 0
+
+    repeated_response = client.delete(
+        f"/api/v1/projects/{created['id']}/evaluations/runs/{run_id}"
+    )
+    assert repeated_response.status_code == 404
+
+
 def test_start_repository_ingestion(monkeypatch: pytest.MonkeyPatch) -> None:
     created = create_project()
     # API 测试只验证任务调度和状态变化，不访问真实 GitHub 网络。

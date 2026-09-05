@@ -451,14 +451,21 @@ button, input, select { font: inherit; }
 .evaluation-results details small { line-height: 1.6; }
 .evaluation-history { margin-top: 0; }
 .evaluation-run-list { display: grid; gap: 8px; }
-.evaluation-run-list button {
+.evaluation-run-item {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center;
+  border: 1px solid #e0e5de; border-radius: 9px; background: #fff; overflow: hidden;
+}
+.evaluation-run-item:hover, .evaluation-run-item[data-active="true"] {
+  border-color: #a9c58f; background: #f6faf2;
+}
+.evaluation-run-open {
   display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 5px 12px; padding: 12px 13px;
-  border: 1px solid #e0e5de; border-radius: 9px; color: #2d4435; background: #fff;
+  border: 0; color: #2d4435; background: transparent;
   text-align: left; cursor: pointer;
 }
-.evaluation-run-list button:hover { border-color: #a9c58f; background: #f6faF2; }
-.evaluation-run-list span { color: #65756b; font-size: 13px; }
-.evaluation-run-list small { grid-column: 2; grid-row: 1 / span 2; align-self: center; color: #7d8981; }
+.evaluation-run-open span { color: #65756b; font-size: 13px; }
+.evaluation-run-open small { grid-column: 2; grid-row: 1 / span 2; align-self: center; color: #7d8981; }
+.evaluation-run-item > .delete-button { margin-right: 10px; white-space: nowrap; }
 
 @media (max-width: 960px) {
   .app-shell { grid-template-columns: 1fr; }
@@ -493,6 +500,6 @@ button, input, select { font: inherit; }
   .result-card header small { font-size: 13px; }
   .result-card pre { max-height: 380px; padding: 17px 16px; font-size: 15px; line-height: 1.75; }
   .evaluation-metrics { grid-template-columns: repeat(2, 1fr); }
-  .evaluation-run-list button { grid-template-columns: 1fr; }
-  .evaluation-run-list small { grid-column: 1; grid-row: auto; }
+  .evaluation-run-open { grid-template-columns: 1fr; }
+  .evaluation-run-open small { grid-column: 1; grid-row: auto; }
 }

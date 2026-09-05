@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 from time import perf_counter
 from typing import Any
 
-from sqlalchemy import distinct, select
+from sqlalchemy import delete, distinct, select
 from sqlalchemy.orm import Session
 
 from repopilot.core.config import settings
@@ -342,6 +342,23 @@ class EvaluationService:
             .order_by(EvaluationRun.created_at.desc())
         ).all()
         return [EvaluationRunSummary.model_validate(row) for row in rows]
+
+    @staticmethod
+    def delete_run(session: Session, project_id: str, run_id: str) -> bool:
+        """删除一次评测实验及其逐题结果，不影响评测题库。"""
+        run = session.scalar(
+            select(EvaluationRun).where(
+                EvaluationRun.id == run_id, EvaluationRun.project_id == project_id
+            )
+        )
+        if run is None:
+            return False
+
+        # 显式删除明细，让行为不依赖不同数据库的级联约束配置。
+        session.execute(delete(EvaluationResult).where(EvaluationResult.run_id == run.id))
+        session.delete(run)
+        session.commit()
+        return True
 
     @staticmethod
     def get_run(

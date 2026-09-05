@@ -226,4 +226,8 @@ export const projectApi = {
     request<EvaluationRunSummary[]>(`/projects/${projectId}/evaluations/runs`),
   getEvaluationRun: (projectId: string, runId: string) =>
     request<EvaluationRunDetail>(`/projects/${projectId}/evaluations/runs/${runId}`),
+  deleteEvaluationRun: (projectId: string, runId: string) =>
+    request<void>(`/projects/${projectId}/evaluations/runs/${runId}`, {
+      method: 'DELETE',
+    }),
 }
