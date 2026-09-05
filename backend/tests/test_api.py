@@ -280,6 +280,46 @@ def test_build_and_list_traceable_chunks(
     assert second_build.json()["total_chunks"] == 2
 
 
+def test_read_scanned_repository_file_for_mcp_gateway(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    created = create_project()
+    project_id = created["id"]
+    repository_root = tmp_path / project_id
+    repository_root.mkdir()
+    source = repository_root / "example.py"
+    source.write_text("first line\nsecond line\nthird line\n", encoding="utf-8")
+    monkeypatch.setattr(
+        "repopilot.services.repository_tool_service.settings.repository_storage_path",
+        tmp_path,
+    )
+
+    with TestingSessionLocal() as session:
+        project = session.get(Project, project_id)
+        assert project is not None
+        project.status = "ready"
+        session.add(
+            RepositoryFile(
+                project_id=project_id,
+                path="example.py",
+                extension=".py",
+                language="Python",
+                size_bytes=source.stat().st_size,
+                content_sha256="test-read-sha256",
+            )
+        )
+        session.commit()
+
+    response = client.post(
+        f"/api/v1/projects/{project_id}/tools/read-file",
+        json={"path": "example.py", "start_line": 2, "end_line": 3},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["path"] == "example.py"
+    assert "second line" in response.json()["content"]
+
+
 def test_vector_index_stats_require_ready_project() -> None:
     created = create_project()
 

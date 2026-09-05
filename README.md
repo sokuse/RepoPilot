@@ -2,8 +2,8 @@
 
 RepoPilot 是一个面向多仓库研发团队的软件维护知识、故障诊断与 Agent 评测平台。
 
-当前仓库已完成第九阶段：在仓库采集、可追溯 RAG、Function Call、多 Agent 诊断和
-长期记忆之上，新增可复现的测试问题集、四种方案对比和评测结果持久化。
+当前仓库已完成第十阶段：在仓库采集、可追溯 RAG、Function Call、多 Agent 诊断、
+长期记忆和自动评测之上，新增可供外部 AI 客户端发现并调用的 MCP Server。
 
 ## 目录
 
@@ -57,6 +57,10 @@ frontend/  Vue 3、TypeScript、Vite
 - 在评测实验页面查看单题明细和历史实验，支持使用同一测试集进行横向比较
 - 前端区分普通用户工作区与开发者实验室，可一键隐藏切片、模型、Token 和评测细节
 - 正式部署时可通过 `VITE_ENABLE_DEVELOPER_LAB=false` 关闭实验室入口和路由访问
+- 使用官方 Python MCP SDK v2，通过类型标注自动生成工具输入和结构化输出 Schema
+- 通过 MCP 暴露项目列表、仓库搜索、受限文件读取、长期记忆、RAG 历史和诊断能力
+- 通过 MCP 查询历史评测实验与单题报告，默认使用本地 `stdio` 传输
+- 可切换为仅监听 `127.0.0.1` 的 Streamable HTTP，且不再使用已被取代的 SSE 传输
 
 ## 本地启动
 
@@ -96,3 +100,16 @@ VITE_ENABLE_DEVELOPER_LAB=false
 - 前端：http://localhost:5173
 - 后端：http://localhost:8000
 - OpenAPI：http://localhost:8000/docs
+
+## MCP Server
+
+先按上面的方式启动 FastAPI。安装后，MCP 客户端可以启动本地 stdio MCP Server：
+
+```powershell
+cd backend
+.venv\Scripts\repopilot-mcp.exe
+```
+
+stdio 模式会等待 MCP 客户端通过标准输入输出通信，因此终端没有普通输出是正常现象。
+MCP 工具通过 FastAPI 统一访问 SQLite 和嵌入式 Qdrant，避免多个进程争用向量数据库。
+客户端配置、工具清单和安全边界见 [RepoPilot MCP 接入](docs/mcp.md)。

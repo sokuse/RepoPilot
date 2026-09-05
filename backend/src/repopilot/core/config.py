@@ -1,5 +1,6 @@
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -43,6 +44,10 @@ class Settings(BaseSettings):
     rag_retrieval_limit: int = 8
     rag_max_context_chars: int = 16_000
     rag_temperature: float = 0.1
+    mcp_transport: Literal["stdio", "streamable-http"] = "stdio"
+    mcp_host: str = "127.0.0.1"
+    mcp_port: int = 8001
+    mcp_api_base_url: str = "http://127.0.0.1:8000/api/v1"
 
 @lru_cache
 def get_settings() -> Settings:

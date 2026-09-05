@@ -8,6 +8,7 @@ from repopilot.api.routes import (
     health,
     projects,
     rag,
+    repository_tools,
     retrieval,
 )
 
@@ -43,4 +44,9 @@ api_router.include_router(
     evaluations.router,
     prefix="/projects/{project_id}/evaluations",
     tags=["evaluations"],
+)
+api_router.include_router(
+    repository_tools.router,
+    prefix="/projects/{project_id}/tools",
+    tags=["repository-tools"],
 )
