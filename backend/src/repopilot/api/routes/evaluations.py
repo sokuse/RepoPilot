@@ -10,7 +10,10 @@ from repopilot.schemas.evaluation import (
     EvaluationRunDetail,
     EvaluationRunSummary,
 )
-from repopilot.services.evaluation_service import evaluation_service
+from repopilot.services.evaluation_service import (
+    InvalidExpectedFilesError,
+    evaluation_service,
+)
 from repopilot.services.project_service import project_service
 
 router = APIRouter()
@@ -30,9 +33,15 @@ def create_evaluation_case(
     project_id: UUID, payload: EvaluationCaseCreate, session: SessionDep
 ) -> EvaluationCaseResponse:
     project = _ready_project(project_id, session)
-    return EvaluationCaseResponse.model_validate(
-        evaluation_service.create_case(session, project.id, payload)
-    )
+    try:
+        case = evaluation_service.create_case(session, project.id, payload)
+    except InvalidExpectedFilesError as error:
+        missing = "、".join(error.missing_files)
+        raise HTTPException(
+            status_code=422,
+            detail=f"期望文件不在当前仓库扫描清单中：{missing}",
+        ) from error
+    return EvaluationCaseResponse.model_validate(case)
 
 
 @router.get("/cases", response_model=list[EvaluationCaseResponse])

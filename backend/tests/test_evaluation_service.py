@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from repopilot.db.base import Base
 from repopilot.models.evaluation import EvaluationResult, EvaluationRun
 from repopilot.models.project import Project
+from repopilot.models.repository_file import RepositoryFile
 from repopilot.schemas.evaluation import EvaluationCaseCreate, EvaluationRunCreate
 from repopilot.schemas.retrieval import SemanticSearchResponse, SemanticSearchResult
 from repopilot.services.evaluation_service import evaluation_service
@@ -22,6 +23,17 @@ def test_retrieval_evaluation_calculates_and_persists_scores(monkeypatch) -> Non
             status="ready",
         )
         session.add(project)
+        session.flush()
+        session.add(
+            RepositoryFile(
+                project_id=project.id,
+                path="backend/src/repopilot/main.py",
+                extension=".py",
+                language="Python",
+                size_bytes=100,
+                content_sha256="evaluation-service-main-file",
+            )
+        )
         session.commit()
         session.refresh(project)
 

@@ -1,5 +1,7 @@
 # RepoPilot
 
+[![CI](https://github.com/sokuse/RepoPilot/actions/workflows/ci.yml/badge.svg)](https://github.com/sokuse/RepoPilot/actions/workflows/ci.yml)
+
 RepoPilot 是一个面向多仓库研发团队的软件维护知识、故障诊断与 Agent 评测平台。
 
 当前仓库已完成仓库采集、可追溯 RAG、Function Call、多 Agent 诊断、长期记忆、
@@ -62,6 +64,7 @@ frontend/  Vue 3、TypeScript、Vite
 - 通过 MCP 查询历史评测实验与单题报告，默认使用本地 `stdio` 传输
 - 可切换为仅监听 `127.0.0.1` 的 Streamable HTTP，且不再使用已被取代的 SSE 传输
 - 使用 Docker Compose 一键启动 Vue、FastAPI 和独立 Qdrant，并通过命名卷持久化数据
+- 使用 GitHub Actions 在 Push 和 Pull Request 时自动执行后端规范、测试、前端构建与 Compose 校验
 
 ## 本地启动
 

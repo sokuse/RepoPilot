@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from repopilot.core.config import settings
 from repopilot.models.evaluation import EvaluationCase, EvaluationResult, EvaluationRun
 from repopilot.models.knowledge_chunk import KnowledgeChunk
+from repopilot.models.repository_file import RepositoryFile
 from repopilot.schemas.diagnosis import ToolCallTrace
 from repopilot.schemas.evaluation import (
     EvaluationCaseCreate,
@@ -24,6 +25,14 @@ from repopilot.services.vector_search_service import vector_search_service
 
 def _normalized_path(value: str) -> str:
     return value.replace("\\", "/").removeprefix("./").strip("/").lower()
+
+
+class InvalidExpectedFilesError(ValueError):
+    """评测题引用了当前仓库扫描清单中不存在的文件。"""
+
+    def __init__(self, missing_files: list[str]) -> None:
+        self.missing_files = missing_files
+        super().__init__(", ".join(missing_files))
 
 
 def _file_matches(expected: str, actual: str) -> bool:
@@ -71,6 +80,20 @@ class EvaluationService:
     def create_case(
         session: Session, project_id: str, payload: EvaluationCaseCreate
     ) -> EvaluationCase:
+        repository_paths = {
+            _normalized_path(path)
+            for path in session.scalars(
+                select(RepositoryFile.path).where(RepositoryFile.project_id == project_id)
+            ).all()
+        }
+        missing_files = [
+            path
+            for path in payload.expected_files
+            if _normalized_path(path) not in repository_paths
+        ]
+        if missing_files:
+            # 在执行昂贵的模型评测前阻止无效测试集，避免得到误导性的零分。
+            raise InvalidExpectedFilesError(missing_files)
         case = EvaluationCase(project_id=project_id, **payload.model_dump())
         session.add(case)
         session.commit()

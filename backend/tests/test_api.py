@@ -179,6 +179,16 @@ def test_create_list_and_delete_evaluation_case() -> None:
         project = session.get(Project, created["id"])
         assert project is not None
         project.status = "ready"
+        session.add(
+            RepositoryFile(
+                project_id=project.id,
+                path="backend/src/repopilot/main.py",
+                extension=".py",
+                language="Python",
+                size_bytes=100,
+                content_sha256="evaluation-main-file",
+            )
+        )
         session.commit()
 
     create_response = client.post(
@@ -201,6 +211,28 @@ def test_create_list_and_delete_evaluation_case() -> None:
         f"/api/v1/projects/{created['id']}/evaluations/cases/{case_id}"
     )
     assert delete_response.status_code == 204
+
+
+def test_reject_evaluation_case_with_file_outside_scanned_repository() -> None:
+    created = create_project()
+    with TestingSessionLocal() as session:
+        project = session.get(Project, created["id"])
+        assert project is not None
+        project.status = "ready"
+        session.commit()
+
+    response = client.post(
+        f"/api/v1/projects/{created['id']}/evaluations/cases",
+        json={
+            "name": "错误项目的入口",
+            "question": "项目在哪里创建应用？",
+            "expected_files": ["another-project/main.py"],
+            "required_keywords": ["FastAPI"],
+        },
+    )
+
+    assert response.status_code == 422
+    assert "不在当前仓库扫描清单" in response.json()["detail"]
 
 
 def test_start_repository_ingestion(monkeypatch: pytest.MonkeyPatch) -> None:
