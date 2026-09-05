@@ -78,8 +78,11 @@ def get_embedding_provider() -> EmbeddingProvider:
 
 @lru_cache
 def get_qdrant_client() -> QdrantClient:
+    if settings.vector_database_url:
+        # 服务模式由 Qdrant 容器独占持久化目录，FastAPI 只通过 HTTP 访问。
+        return QdrantClient(url=settings.vector_database_url)
     settings.vector_database_path.mkdir(parents=True, exist_ok=True)
-    # 本地持久化模式适合练习和小规模项目，未来可以只改成 Qdrant 服务 URL。
+    # 不配置 URL 时保留原有嵌入式模式，方便直接在 PyCharm 中开发。
     return QdrantClient(path=str(settings.vector_database_path))
 
 

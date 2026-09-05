@@ -27,6 +27,8 @@ class Settings(BaseSettings):
     max_scanned_file_size_bytes: int = 1_000_000
     chunk_size_chars: int = 1_500
     chunk_overlap_chars: int = 200
+    # 本地开发默认使用嵌入式目录；Docker/生产环境通过 URL 连接独立 Qdrant。
+    vector_database_url: str | None = None
     vector_database_path: Path = BACKEND_DIR / "data" / "qdrant"
     embedding_model_name: str = "text-embedding-v4"
     embedding_api_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"

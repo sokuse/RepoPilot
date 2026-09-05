@@ -2,13 +2,13 @@
 
 RepoPilot 是一个面向多仓库研发团队的软件维护知识、故障诊断与 Agent 评测平台。
 
-当前仓库已完成第十阶段：在仓库采集、可追溯 RAG、Function Call、多 Agent 诊断、
-长期记忆和自动评测之上，新增可供外部 AI 客户端发现并调用的 MCP Server。
+当前仓库已完成仓库采集、可追溯 RAG、Function Call、多 Agent 诊断、长期记忆、
+自动评测与 MCP Server，并提供 Vue、FastAPI、Qdrant 的 Docker Compose 一键环境。
 
 ## 目录
 
 ```text
-backend/   Python 3.11+、FastAPI，后续承载 LangChain/LangGraph/RAG/MCP
+backend/   Python 3.11+、FastAPI，承载 LangGraph/RAG/Agent/MCP
 frontend/  Vue 3、TypeScript、Vite
 ```
 
@@ -28,7 +28,7 @@ frontend/  Vue 3、TypeScript、Vite
 - 保存每个知识切片的源文件、起止行号、符号名、策略和内容哈希
 - 通过页面生成/重建切片，并查看仓库级切片统计
 - 调用百炼 `text-embedding-v4` 生成 1024 维文本与代码向量
-- 使用 Qdrant 本地持久化模式按项目隔离向量
+- 支持 Qdrant 嵌入式开发模式和独立服务模式，并按项目隔离向量
 - 通过知识检索页面返回带相似度、文件路径和行号的代码片段
 - 使用 LangGraph 编排“语义召回 → Qwen 生成 → 引用校验”工作流
 - 通过 `POST /api/v1/projects/{project_id}/rag/stream` 以 SSE 实时推送召回、Token 和校验事件
@@ -61,6 +61,7 @@ frontend/  Vue 3、TypeScript、Vite
 - 通过 MCP 暴露项目列表、仓库搜索、受限文件读取、长期记忆、RAG 历史和诊断能力
 - 通过 MCP 查询历史评测实验与单题报告，默认使用本地 `stdio` 传输
 - 可切换为仅监听 `127.0.0.1` 的 Streamable HTTP，且不再使用已被取代的 SSE 传输
+- 使用 Docker Compose 一键启动 Vue、FastAPI 和独立 Qdrant，并通过命名卷持久化数据
 
 ## 本地启动
 
@@ -100,6 +101,18 @@ VITE_ENABLE_DEVELOPER_LAB=false
 - 前端：http://localhost:5173
 - 后端：http://localhost:8000
 - OpenAPI：http://localhost:8000/docs
+
+## Docker 一键启动
+
+先确认 `backend/.env` 已填写 `REPOPILOT_QWEN_API_KEY`，然后在项目根目录执行：
+
+```powershell
+docker compose up --build -d
+```
+
+访问 http://localhost:5173。Docker 环境使用独立 Qdrant 服务，本地 PyCharm 开发仍可继续
+使用原来的嵌入式 Qdrant，不会互相覆盖。容器结构、数据卷、MCP profile 和代理配置见
+[Docker Compose 部署](docs/docker.md)。
 
 ## MCP Server
 

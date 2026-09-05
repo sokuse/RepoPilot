@@ -1,0 +1,9 @@
+.venv
+.env
+data
+repopilot.db
+.pytest_cache
+.ruff_cache
+tests
+__pycache__
+*.pyc

@@ -1,0 +1,75 @@
+name: repopilot
+
+services:
+  qdrant:
+    image: qdrant/qdrant:v1.18.2
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6333:6333"
+    volumes:
+      - qdrant_data:/qdrant/storage
+
+  backend:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    environment:
+      REPOPILOT_ENVIRONMENT: docker
+      REPOPILOT_DATABASE_URL: sqlite:////app/data/repopilot.db
+      REPOPILOT_REPOSITORY_STORAGE_PATH: /app/data/repositories
+      REPOPILOT_VECTOR_DATABASE_URL: http://qdrant:6333
+      REPOPILOT_CORS_ORIGINS: '["http://localhost:5173"]'
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - repopilot_data:/app/data
+    depends_on:
+      - qdrant
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health')"
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_ENABLE_DEVELOPER_LAB: ${VITE_ENABLE_DEVELOPER_LAB:-true}
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5173:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  # 可选服务：docker compose --profile mcp up -d 启动 HTTP MCP Server。
+  mcp:
+    profiles: ["mcp"]
+    build:
+      context: ./backend
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    environment:
+      REPOPILOT_MCP_TRANSPORT: streamable-http
+      REPOPILOT_MCP_HOST: 0.0.0.0
+      REPOPILOT_MCP_PORT: 8001
+      REPOPILOT_MCP_API_BASE_URL: http://backend:8000/api/v1
+    command: ["repopilot-mcp"]
+    ports:
+      - "127.0.0.1:8001:8001"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  repopilot_data:
+  qdrant_data:

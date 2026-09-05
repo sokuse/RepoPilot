@@ -7,6 +7,7 @@ from repopilot.db.base import Base
 from repopilot.models.knowledge_chunk import KnowledgeChunk
 from repopilot.models.project import Project
 from repopilot.models.repository_file import RepositoryFile
+from repopilot.services import vector_search_service as vector_search_module
 from repopilot.services.vector_search_service import VectorSearchService
 
 
@@ -40,6 +41,30 @@ class FakeQdrantClient:
         return SimpleNamespace(
             points=[SimpleNamespace(payload=point.payload, score=0.91)]
         )
+
+
+def test_qdrant_client_uses_server_url_when_configured(monkeypatch) -> None:
+    captured: dict[str, str] = {}
+
+    def create_client(*, url: str):
+        captured["url"] = url
+        return object()
+
+    vector_search_module.get_qdrant_client.cache_clear()
+    monkeypatch.setattr(
+        vector_search_module.settings,
+        "vector_database_url",
+        "http://qdrant:6333",
+    )
+    monkeypatch.setattr(vector_search_module, "QdrantClient", create_client)
+
+    try:
+        vector_search_module.get_qdrant_client()
+    finally:
+        # 避免缓存的测试对象影响后续用例。
+        vector_search_module.get_qdrant_client.cache_clear()
+
+    assert captured["url"] == "http://qdrant:6333"
 
 
 def test_build_and_search_vector_index(monkeypatch) -> None:
