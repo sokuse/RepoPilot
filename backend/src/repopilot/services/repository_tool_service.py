@@ -1,4 +1,5 @@
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from time import perf_counter
@@ -15,6 +16,7 @@ from repopilot.services.repository_ingestion_service import repository_ingestion
 from repopilot.services.vector_search_service import vector_search_service
 
 MAX_TOOL_RESULT_CHARS = 20_000
+MAX_GREP_LINE_CHARS = 300
 
 
 class SemanticSearchArguments(BaseModel):
@@ -41,6 +43,13 @@ class ListFilesArguments(BaseModel):
     limit: int = Field(default=50, ge=1, le=100)
 
 
+class GrepArguments(BaseModel):
+    pattern: str = Field(min_length=1, max_length=200)
+    path_prefix: str = Field(default="", max_length=500)
+    case_sensitive: bool = False
+    limit: int = Field(default=20, ge=1, le=50)
+
+
 @dataclass(frozen=True)
 class ToolExecution:
     trace: ToolCallTrace
@@ -55,6 +64,16 @@ REPOSITORY_TOOL_DEFINITIONS: list[dict[str, Any]] = [
             "name": "semantic_search",
             "description": "按自然语言语义检索当前代码仓库，返回相关代码片段、文件路径和行号。",
             "parameters": SemanticSearchArguments.model_json_schema(),
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "grep_repository",
+            "description": (
+                "使用正则表达式逐行搜索当前仓库，适合查找精确符号名、错误码、配置键和调用位置。"
+            ),
+            "parameters": GrepArguments.model_json_schema(),
         },
     },
     {
@@ -143,6 +162,60 @@ class RepositoryToolService:
         return {"prefix": arguments.prefix, "count": len(paths), "files": paths}
 
     @staticmethod
+    def _grep_repository(
+        session: Session, project_id: str, raw: dict[str, Any]
+    ) -> dict[str, Any]:
+        arguments = GrepArguments.model_validate(raw)
+        flags = 0 if arguments.case_sensitive else re.IGNORECASE
+        try:
+            pattern = re.compile(arguments.pattern, flags)
+        except re.error as error:
+            raise ValueError(f"无效的正则表达式：{error}") from error
+
+        normalized_prefix = arguments.path_prefix.replace("\\", "/").lstrip("/")
+        statement = select(RepositoryFile).where(RepositoryFile.project_id == project_id)
+        if normalized_prefix:
+            statement = statement.where(
+                RepositoryFile.path.startswith(normalized_prefix, autoescape=True)
+            )
+
+        repository_root = RepositoryToolService._repository_root(project_id)
+        matches: list[dict[str, Any]] = []
+        truncated = False
+        # ponytail: 逐行标准库搜索适合当前单机仓库；仓库规模明显增大时再替换为 ripgrep 子进程。
+        for repository_file in session.scalars(statement.order_by(RepositoryFile.path)):
+            target = (repository_root / repository_file.path).resolve()
+            if not target.is_relative_to(repository_root) or not target.is_file():
+                continue
+            for line_number, line in enumerate(
+                target.read_text(encoding="utf-8", errors="replace").splitlines(), start=1
+            ):
+                match = pattern.search(line)
+                if match is None:
+                    continue
+                if len(matches) >= arguments.limit:
+                    truncated = True
+                    break
+                matches.append(
+                    {
+                        "path": repository_file.path,
+                        "line_number": line_number,
+                        "column": match.start() + 1,
+                        "line": line[:MAX_GREP_LINE_CHARS],
+                    }
+                )
+            if truncated:
+                break
+        return {
+            "pattern": arguments.pattern,
+            "path_prefix": normalized_prefix,
+            "case_sensitive": arguments.case_sensitive,
+            "count": len(matches),
+            "matches": matches,
+            "truncated": truncated,
+        }
+
+    @staticmethod
     def _semantic_search(
         session: Session, project_id: str, raw: dict[str, Any]
     ) -> dict[str, Any]:
@@ -177,6 +250,9 @@ class RepositoryToolService:
             if name == "semantic_search":
                 payload = self._semantic_search(session, project_id, arguments)
                 summary = f"语义检索返回 {payload['count']} 个相关切片"
+            elif name == "grep_repository":
+                payload = self._grep_repository(session, project_id, arguments)
+                summary = f"正则搜索返回 {payload['count']} 个匹配位置"
             elif name == "read_file":
                 payload = self._read_file(session, project_id, arguments)
                 summary = (

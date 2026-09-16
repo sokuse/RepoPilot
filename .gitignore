@@ -17,3 +17,6 @@ dist/
 .idea/
 .vscode/
 .DS_Store
+
+# 独立的第二个 Git 项目，不纳入 RepoPilot 仓库。
+/shopkeeper-agent/
