@@ -9,6 +9,7 @@ import type {
   MemoryStats,
   Project,
   RagAnswerResponse,
+  RepositoryGrepMatch,
   SemanticSearchResult,
   VectorIndexStats,
 } from '../types/project'
@@ -19,7 +20,13 @@ const projects = ref<Project[]>([])
 const selectedProjectId = ref('')
 const indexStats = ref<VectorIndexStats | null>(null)
 const query = ref('')
+const searchMode = ref<'semantic' | 'grep'>('semantic')
 const results = ref<SemanticSearchResult[]>([])
+const grepResults = ref<RepositoryGrepMatch[]>([])
+const grepPathPrefix = ref('')
+const grepCaseSensitive = ref(false)
+const grepSearched = ref(false)
+const grepTruncated = ref(false)
 const ragAnswer = ref<RagAnswerResponse | null>(null)
 const conversations = ref<ConversationSummary[]>([])
 const selectedConversationId = ref('')
@@ -47,6 +54,8 @@ async function loadProjects() {
 async function loadIndexStats() {
   indexStats.value = null
   results.value = []
+  grepResults.value = []
+  grepSearched.value = false
   ragAnswer.value = null
   if (!selectedProjectId.value) return
   try {
@@ -149,6 +158,31 @@ async function searchKnowledge() {
   }
 }
 
+async function searchGrep() {
+  if (!selectedProjectId.value || !query.value.trim()) return
+  searching.value = true
+  errorMessage.value = ''
+  ragAnswer.value = null
+  results.value = []
+  grepSearched.value = false
+  try {
+    const response = await projectApi.grepRepository(
+      selectedProjectId.value,
+      query.value.trim(),
+      grepPathPrefix.value.trim(),
+      grepCaseSensitive.value,
+    )
+    grepResults.value = response.matches
+    grepTruncated.value = response.truncated
+    grepSearched.value = true
+  } catch (error) {
+    grepResults.value = []
+    errorMessage.value = error instanceof ApiError ? error.message : '精确搜索失败，请查看后端日志。'
+  } finally {
+    searching.value = false
+  }
+}
+
 async function askKnowledge() {
   if (!selectedProjectId.value || !query.value.trim()) return
   const question = query.value.trim()
@@ -222,7 +256,7 @@ onMounted(() => void loadProjects())
   <section class="page knowledge-page">
     <header class="page-header">
       <div>
-        <p class="eyebrow">SEMANTIC RETRIEVAL</p>
+        <p class="eyebrow">PROJECT RETRIEVAL</p>
         <h1>知识检索</h1>
         <p>{{ developerMode ? '从 Qdrant 检索相关代码，再由 LangGraph 编排 Qwen 生成带真实引用的中文答案。' : '询问项目结构、实现逻辑和维护问题，回答会附带可核对的代码来源。' }}</p>
       </div>
@@ -264,16 +298,33 @@ onMounted(() => void loadProjects())
         </button>
       </div>
 
-      <form class="search-form" @submit.prevent="askKnowledge">
+      <div class="search-mode" role="group" aria-label="检索方式">
+        <button
+          type="button"
+          :class="{ active: searchMode === 'semantic' }"
+          @click="searchMode = 'semantic'"
+        >
+          语义问答
+        </button>
+        <button
+          type="button"
+          :class="{ active: searchMode === 'grep' }"
+          @click="searchMode = 'grep'"
+        >
+          精确搜索
+        </button>
+      </div>
+
+      <form class="search-form" @submit.prevent="searchMode === 'grep' ? searchGrep() : askKnowledge()">
         <input
           v-model="query"
-          minlength="2"
+          :minlength="searchMode === 'grep' ? 1 : 2"
           required
-          placeholder="例如：项目是在哪里创建 FastAPI 应用的？"
+          :placeholder="searchMode === 'grep' ? '输入字符串或正则，例如：ChatConfigurationError' : '例如：项目是在哪里创建 FastAPI 应用的？'"
         />
         <div class="search-actions">
           <button
-            v-if="developerMode"
+            v-if="developerMode && searchMode === 'semantic'"
             class="secondary-button"
             type="button"
             :disabled="!indexStats?.ready || searching || answering"
@@ -284,16 +335,51 @@ onMounted(() => void loadProjects())
           <button
             class="primary-button"
             type="submit"
-            :disabled="!indexStats?.ready || searching || answering"
+            :disabled="searchMode === 'semantic' ? !indexStats?.ready || searching || answering : !selectedProjectId || searching"
           >
-            {{ answering ? '正在流式生成…' : '生成回答' }}
+            {{ searchMode === 'grep' ? (searching ? '搜索中…' : '精确搜索') : (answering ? '正在流式生成…' : '生成回答') }}
           </button>
         </div>
       </form>
+      <div v-if="searchMode === 'grep'" class="grep-options">
+        <label>
+          路径前缀
+          <input v-model="grepPathPrefix" placeholder="可选，例如：backend/src/" />
+        </label>
+        <label class="grep-checkbox">
+          <input v-model="grepCaseSensitive" type="checkbox" />
+          区分大小写
+        </label>
+        <small>支持 Python 正则表达式，最多返回 20 个匹配位置。</small>
+      </div>
       <p v-if="errorMessage" class="error-banner">{{ errorMessage }}</p>
     </article>
 
-    <article class="panel conversation-panel">
+    <div v-if="searchMode === 'grep' && grepResults.length" class="search-results">
+      <div class="results-heading">
+        <p class="eyebrow">EXACT MATCHES</p>
+        <span>{{ grepResults.length }} 个匹配位置{{ grepTruncated ? ' · 结果已截断' : '' }}</span>
+      </div>
+      <article
+        v-for="result in grepResults"
+        :key="`${result.path}:${result.line_number}:${result.column}`"
+        class="result-card"
+      >
+        <header>
+          <div>
+            <strong>{{ result.path }}</strong>
+            <small>第 {{ result.line_number }} 行 · 第 {{ result.column }} 列</small>
+          </div>
+          <span class="score">精确命中</span>
+        </header>
+        <pre><code>{{ result.line }}</code></pre>
+      </article>
+    </div>
+    <div v-else-if="searchMode === 'grep' && grepSearched" class="retrieval-empty">
+      当前范围内没有找到匹配内容。可以检查大小写、正则表达式或路径前缀。
+    </div>
+
+    <article v-if="searchMode === 'semantic'" class="panel conversation-panel">
       <div class="panel-heading">
         <div><p class="eyebrow">CONVERSATION MEMORY</p><h2>对话记录</h2></div>
         <button class="secondary-button" type="button" :disabled="!selectedProjectId" @click="createConversation">
@@ -332,7 +418,7 @@ onMounted(() => void loadProjects())
       <p v-else class="history-empty">新问题和回答会自动保存在当前对话中。</p>
     </article>
 
-    <article v-if="ragAnswer" class="answer-panel">
+    <article v-if="searchMode === 'semantic' && ragAnswer" class="answer-panel">
       <div class="answer-heading">
         <div>
           <p class="eyebrow">RAG ANSWER</p>
@@ -380,7 +466,7 @@ onMounted(() => void loadProjects())
       </div>
     </article>
 
-    <div v-if="developerMode && results.length" class="search-results">
+    <div v-if="searchMode === 'semantic' && developerMode && results.length" class="search-results">
       <div class="results-heading">
         <p class="eyebrow">RETRIEVAL EVIDENCE</p>
         <span>{{ results.length }} 条结果</span>
@@ -399,7 +485,7 @@ onMounted(() => void loadProjects())
         <pre><code>{{ result.content }}</code></pre>
       </article>
     </div>
-    <div v-else-if="developerMode && !loading" class="retrieval-empty">
+    <div v-else-if="searchMode === 'semantic' && developerMode && !loading" class="retrieval-empty">
       构建索引后输入一个与代码或文档相关的问题，检索结果会保留文件路径和行号。
     </div>
   </section>

@@ -396,6 +396,49 @@ def test_read_scanned_repository_file_for_mcp_gateway(
     assert "second line" in response.json()["content"]
 
 
+def test_grep_scanned_repository_files(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    created = create_project()
+    project_id = created["id"]
+    repository_root = tmp_path / project_id
+    repository_root.mkdir()
+    source = repository_root / "example.py"
+    source.write_text("class ProjectService:\n    pass\n", encoding="utf-8")
+    monkeypatch.setattr(
+        "repopilot.services.repository_tool_service.settings.repository_storage_path",
+        tmp_path,
+    )
+
+    with TestingSessionLocal() as session:
+        project = session.get(Project, project_id)
+        assert project is not None
+        project.status = "ready"
+        session.add(
+            RepositoryFile(
+                project_id=project_id,
+                path="example.py",
+                extension=".py",
+                language="Python",
+                size_bytes=source.stat().st_size,
+                content_sha256="test-grep-sha256",
+            )
+        )
+        session.commit()
+
+    response = client.post(
+        f"/api/v1/projects/{project_id}/tools/grep",
+        json={"pattern": "projectservice", "case_sensitive": False},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["count"] == 1
+    assert response.json()["matches"][0] == {
+        "path": "example.py",
+        "line_number": 1,
+        "column": 7,
+        "line": "class ProjectService:",
+    }
+
+
 def test_vector_index_stats_require_ready_project() -> None:
     created = create_project()
 

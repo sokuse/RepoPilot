@@ -58,6 +58,23 @@ export interface SemanticSearchResponse {
   results: SemanticSearchResult[]
 }
 
+export interface RepositoryGrepMatch {
+  path: string
+  line_number: number
+  column: number
+  line: string
+}
+
+export interface RepositoryGrepResponse {
+  project_id: string
+  pattern: string
+  path_prefix: string
+  case_sensitive: boolean
+  count: number
+  matches: RepositoryGrepMatch[]
+  truncated: boolean
+}
+
 export interface RagCitation {
   source_id: string
   chunk_id: string

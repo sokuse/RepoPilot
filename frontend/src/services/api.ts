@@ -19,6 +19,7 @@ import type {
   RagRunSummary,
   RagStreamEvent,
   RepositoryStats,
+  RepositoryGrepResponse,
   SemanticSearchResponse,
   VectorIndexStats,
 } from '../types/project'
@@ -104,6 +105,22 @@ export const projectApi = {
     request<SemanticSearchResponse>(`/projects/${projectId}/index/search`, {
       method: 'POST',
       body: JSON.stringify({ query, limit }),
+    }),
+  grepRepository: (
+    projectId: string,
+    pattern: string,
+    pathPrefix = '',
+    caseSensitive = false,
+    limit = 20,
+  ) =>
+    request<RepositoryGrepResponse>(`/projects/${projectId}/tools/grep`, {
+      method: 'POST',
+      body: JSON.stringify({
+        pattern,
+        path_prefix: pathPrefix,
+        case_sensitive: caseSensitive,
+        limit,
+      }),
     }),
   askRag: (projectId: string, question: string, retrievalLimit = 8) =>
     request<RagAnswerResponse>(`/projects/${projectId}/rag/ask`, {

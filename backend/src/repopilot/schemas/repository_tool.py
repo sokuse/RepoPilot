@@ -24,3 +24,27 @@ class RepositoryFileReadResponse(BaseModel):
     end_line: int
     content: str
     truncated: bool
+
+
+class RepositoryGrepRequest(BaseModel):
+    pattern: str = Field(min_length=1, max_length=200)
+    path_prefix: str = Field(default="", max_length=500)
+    case_sensitive: bool = False
+    limit: int = Field(default=20, ge=1, le=50)
+
+
+class RepositoryGrepMatch(BaseModel):
+    path: str
+    line_number: int
+    column: int
+    line: str
+
+
+class RepositoryGrepResponse(BaseModel):
+    project_id: UUID
+    pattern: str
+    path_prefix: str
+    case_sensitive: bool
+    count: int
+    matches: list[RepositoryGrepMatch]
+    truncated: bool
